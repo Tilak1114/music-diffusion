@@ -50,6 +50,6 @@ module_config = {
 
 trainer_config = {
     "max_epochs":40,
-    "devices":-1
+    "devices":[1]
 }
 

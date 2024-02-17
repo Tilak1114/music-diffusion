@@ -1,13 +1,11 @@
 import torch
 import torch.nn as nn
-from unet.components import TimeStepEmbedding
+from unet.embeddings import TimeStepEmbedding
 from typing import Any, Dict, List, Optional, Tuple, Union
-from diffusers.models.unet_2d import (
+from unet.components import (
     get_down_block,
+    UNetMidBlock2DCrossAttnMusic,
     get_up_block
-)
-from diffusers.models.unet_2d_blocks import (
-    UNetMidBlock2DCrossAttnMusic
 )
 
 
@@ -49,16 +47,11 @@ class UNet(nn.Module):
                 temb_channels=1280,
                 add_downsample=not is_final_block,
                 resnet_eps=1e-05,
-                resnet_act_fn='silu',
                 resnet_groups=32,
                 cross_attention_dim=cross_attention_dim[i],
                 attn_num_head_channels=attention_head_dim[i],
                 downsample_padding=1,
-                dual_cross_attention=False,
-                use_linear_projection=True,
-                only_cross_attention=False,
                 upcast_attention=True,
-                resnet_time_scale_shift="default",
             )
             self.down_blocks.append(down_block)
 
@@ -66,21 +59,16 @@ class UNet(nn.Module):
             in_channels=block_out_channels[-1],
             temb_channels=1280,
             resnet_eps=1e-05,
-            resnet_act_fn='silu',
             output_scale_factor=1,
-            resnet_time_scale_shift="default",
             cross_attention_dim=cross_attention_dim[-1],
             attn_num_head_channels=attention_head_dim[-1],
             resnet_groups=32,
-            dual_cross_attention=False,
-            use_linear_projection=True,
             upcast_attention=True,
         )
 
         reversed_block_out_channels = list(reversed(block_out_channels))
         reversed_attention_head_dim = list(reversed(attention_head_dim))
         reversed_cross_attention_dim = list(reversed(cross_attention_dim))
-        only_cross_attention = [False] * len(down_block_types)
 
         self.num_upsamplers = 0
 
@@ -109,15 +97,10 @@ class UNet(nn.Module):
                 temb_channels=1280,
                 add_upsample=add_upsample,
                 resnet_eps=1e-05,
-                resnet_act_fn='silu',
                 resnet_groups=32,
                 cross_attention_dim=reversed_cross_attention_dim[i],
                 attn_num_head_channels=reversed_attention_head_dim[i],
-                dual_cross_attention=False,
-                use_linear_projection=True,
-                only_cross_attention=only_cross_attention[i],
                 upcast_attention=True,
-                resnet_time_scale_shift='default',
             )
             self.up_blocks.append(up_block)
             prev_output_channel = output_channel

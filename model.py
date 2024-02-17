@@ -7,7 +7,7 @@ import soundfile as sf
 import tqdm
 import random
 import torch.nn.functional as F
-from unet.components import FundamentalMusicEmbedding, MusicPositionalEncoding, BeatEmbedding, ChordEmbedding
+from unet.embeddings import FundamentalMusicEmbedding, MusicPositionalEncoding, BeatEmbedding, ChordEmbedding, BeatTokenizer, ChordTokenizer
 from tools import torch_tools
 from transformers import get_scheduler
 from sample_generation_helper import SampleGeneration
@@ -17,7 +17,6 @@ from transformers import AutoTokenizer
 from transformers import T5EncoderModel
 from unet import UNet
 from diffusers.schedulers.scheduling_ddpm import DDPMScheduler
-from unet.components import BeatTokenizer, ChordTokenizer, BeatEmbedding, ChordEmbedding
 
 
 class LatentMusicDiffusionModel(pl.LightningModule):
@@ -160,7 +159,7 @@ class LatentMusicDiffusionModel(pl.LightningModule):
             prompt = next(iter(val_dataloader))[1]
             prompt = "This is an instrumental jam recording of a gear showcase. There is an electric guitar with a clear sound being played with an echo pedal. It gives the recording a dreamy feeling. This track can be used to lift guitar samples with effect for a beat. The chord sequence is D, G. The beat counts to 3. The bpm is 83.0. The key of this song is D minor."
 
-            if self.current_epoch % 1 == 0:
+            if self.current_epoch % 5 == 0:
                 print(f"Generating for {prompt}")
                 wav = self.sample_gen.generate(prompt)
                 out = f"./tmp/output_{self.current_epoch}.wav"

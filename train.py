@@ -12,12 +12,12 @@ from torch.utils.data import Dataset, DataLoader
 class Text2AudioDataset(Dataset):
     def __init__(self, dataset, text_column, audio_column, beats_column, chords_column, chords_time_column):
 
-        self.inputs = list(dataset[text_column])
-        self.audios = list(dataset[audio_column])
-        self.beats = list(dataset[beats_column])
-        self.chords = list(dataset[chords_column])
-        self.chords_time = list(dataset[chords_time_column])
-        self.indices = list(range(len(self.inputs)))
+        self.inputs = list(dataset[text_column])[:16]
+        self.audios = list(dataset[audio_column])[:16]
+        self.beats = list(dataset[beats_column])[:16]
+        self.chords = list(dataset[chords_column])[:16]
+        self.chords_time = list(dataset[chords_time_column])[:16]
+        self.indices = list(range(len(self.inputs)))[:16]
 
         self.mapper = {}
         for index, audio, text, beats, chords in zip(self.indices, self.audios, self.inputs, self.beats, self.chords):
@@ -105,8 +105,8 @@ def main():
         accelerator='gpu',
         strategy='ddp_find_unused_parameters_true',
         devices=config.trainer_config['devices'],
-        logger=tb_logger,
-        callbacks=[checkpoint_callback],
+        # logger=tb_logger,
+        # callbacks=[checkpoint_callback],
         max_epochs=config.trainer_config['max_epochs'],
         gradient_clip_val=1.0,
         log_every_n_steps=50,
@@ -115,7 +115,7 @@ def main():
         val_check_interval=1.0,
     )
 
-    trainer.fit(model=model, datamodule=datamodule, ckpt_path=last_checkpoint_path)
+    trainer.fit(model=model, datamodule=datamodule)
 
 if __name__ == "__main__":
     main()
