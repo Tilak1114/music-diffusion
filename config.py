@@ -19,10 +19,37 @@ module_config = {
     "adam_beta2":0.999,
     "adam_weight_decay":1e-2,
     "adam_eps":1e-08,
+    "unet":{
+        "in_channels": 8,
+        "block_out_channels": [
+            320,
+            640,
+            1280,
+            1280
+        ],
+        "down_block_types": [
+            "CrossAttnDownBlock2DMusic",
+            "CrossAttnDownBlock2DMusic",
+            "CrossAttnDownBlock2DMusic",
+            "DownBlock2D"
+        ],
+        "attention_head_dim": [
+            5,
+            10,
+            20,
+            20
+        ],
+        "up_block_types": [
+            "UpBlock2D",
+            "CrossAttnUpBlock2DMusic",
+            "CrossAttnUpBlock2DMusic",
+            "CrossAttnUpBlock2DMusic"
+        ],
+    }
 }
 
 trainer_config = {
-    "max_epochs":-1,
+    "max_epochs":40,
     "devices":-1
 }
 

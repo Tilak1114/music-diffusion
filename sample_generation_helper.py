@@ -130,7 +130,10 @@ class MusicFeaturePredictor:
 class SampleGeneration:
     def __init__(
         self,
-        vae, stft, model,
+        device,
+        vae, 
+        stft, 
+        model,
         name="declare-lab/mustango",
         cache_dir=None,
         local_files_only=False,
@@ -144,6 +147,7 @@ class SampleGeneration:
         self.vae = vae
         self.stft = stft
         self.model = model
+        self.device = device
 
         self.vae.eval()
         self.stft.eval()
@@ -153,7 +157,7 @@ class SampleGeneration:
             'stabilityai/stable-diffusion-2-1', subfolder="scheduler"
         )
 
-    def generate(self, prompt, steps=100, guidance=3, samples=1, disable_progress=True):
+    def generate(self, prompt, steps=100, samples=1, disable_progress=True):
         """Genrate music for a single prompt string."""
 
         with torch.no_grad():
@@ -164,8 +168,8 @@ class SampleGeneration:
                 [chords],
                 [chords_times],
                 self.scheduler,
+                self.device,
                 steps,
-                guidance,
                 samples,
                 disable_progress,
             )
