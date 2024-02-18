@@ -8,7 +8,6 @@ from unet.components import (
     get_up_block
 )
 
-
 class UNet(nn.Module):
     def __init__(self, config):
         super(UNet, self).__init__()
@@ -51,7 +50,6 @@ class UNet(nn.Module):
                 cross_attention_dim=cross_attention_dim[i],
                 attn_num_head_channels=attention_head_dim[i],
                 downsample_padding=1,
-                upcast_attention=True,
             )
             self.down_blocks.append(down_block)
 
@@ -59,11 +57,9 @@ class UNet(nn.Module):
             in_channels=block_out_channels[-1],
             temb_channels=1280,
             resnet_eps=1e-05,
-            output_scale_factor=1,
             cross_attention_dim=cross_attention_dim[-1],
             attn_num_head_channels=attention_head_dim[-1],
             resnet_groups=32,
-            upcast_attention=True,
         )
 
         reversed_block_out_channels = list(reversed(block_out_channels))
@@ -100,7 +96,6 @@ class UNet(nn.Module):
                 resnet_groups=32,
                 cross_attention_dim=reversed_cross_attention_dim[i],
                 attn_num_head_channels=reversed_attention_head_dim[i],
-                upcast_attention=True,
             )
             self.up_blocks.append(up_block)
             prev_output_channel = output_channel
@@ -122,39 +117,14 @@ class UNet(nn.Module):
     def forward(self,
                 latents: torch.FloatTensor,
                 timesteps,
-                encoder_hidden_states: torch.Tensor,
-                beat_features: torch.Tensor,
-                chord_features: torch.Tensor,
-                encoder_attention_mask: Optional[torch.Tensor] = None,
-                beat_attention_mask: Optional[torch.Tensor] = None,
-                chord_attention_mask: Optional[torch.Tensor] = None,):
+                encoded_prompts: torch.Tensor,
+                encoded_beats: torch.Tensor,
+                encoded_chords: torch.Tensor,):
 
         timestep_embedding = self.time_step_embedding(timesteps)
         latents = self.pre_encoder_conv(latents)
 
         forward_upsample_size = True
-
-        # ensure encoder_attention_mask is a bias, and make it broadcastable over multi-head-attention channels
-        if encoder_attention_mask is not None:
-            # if it's a mask: turn it into a bias. otherwise: assume it's already a bias
-            if encoder_attention_mask.dtype is torch.bool:
-                encoder_attention_mask = (
-                    1 - encoder_attention_mask.to(latents.dtype)) * -10000.0
-            encoder_attention_mask = encoder_attention_mask.unsqueeze(1)
-
-        if beat_attention_mask is not None:  # Nic Modified
-            # if it's a mask: turn it into a bias. otherwise: assume it's already a bias
-            if beat_attention_mask.dtype is torch.bool:
-                beat_attention_mask = (
-                    1 - beat_attention_mask.to(latents.dtype)) * -10000.0
-            beat_attention_mask = beat_attention_mask.unsqueeze(1)
-
-        if chord_attention_mask is not None:  # Nic Modified
-            # if it's a mask: turn it into a bias. otherwise: assume it's already a bias
-            if chord_attention_mask.dtype is torch.bool:
-                chord_attention_mask = (
-                    1 - chord_attention_mask.to(latents.dtype)) * -10000.0
-            chord_attention_mask = chord_attention_mask.unsqueeze(1)
 
         down_block_res_samples = (latents,)
         for downsample_block in self.down_blocks:
@@ -162,14 +132,9 @@ class UNet(nn.Module):
                 latents, res_samples = downsample_block(
                     hidden_states=latents,
                     temb=timestep_embedding,
-                    encoder_hidden_states=encoder_hidden_states,
-                    beat_features=beat_features,
-                    chord_features=chord_features,
-                    attention_mask=None,
-                    cross_attention_kwargs=None,
-                    encoder_attention_mask=encoder_attention_mask,
-                    beat_attention_mask=beat_attention_mask,
-                    chord_attention_mask=chord_attention_mask
+                    encoded_prompts=encoded_prompts,
+                    encoded_beats=encoded_beats,
+                    encoded_chords=encoded_chords,
                 )
             else:
                 latents, res_samples = downsample_block(
@@ -181,14 +146,9 @@ class UNet(nn.Module):
 
         latents = self.mid_block(
             latents, timestep_embedding,
-            encoder_hidden_states=encoder_hidden_states,
-            beat_features=beat_features,
-            chord_features=chord_features,
-            attention_mask=None,
-            cross_attention_kwargs=None,
-            encoder_attention_mask=encoder_attention_mask,
-            beat_attention_mask=beat_attention_mask,
-            chord_attention_mask=chord_attention_mask)
+            encoded_prompts=encoded_prompts,
+            encoded_beats=encoded_beats,
+            encoded_chords=encoded_chords,)
 
         # UP
         for i, upsample_block in enumerate(self.up_blocks):
@@ -207,15 +167,10 @@ class UNet(nn.Module):
                     hidden_states=latents,
                     temb=timestep_embedding,
                     res_hidden_states_tuple=res_samples,
-                    encoder_hidden_states=encoder_hidden_states,
-                    beat_features = beat_features,
-                    chord_features = chord_features,
-                    cross_attention_kwargs=None,
+                    encoded_prompts=encoded_prompts,
+                    encoded_beats = encoded_beats,
+                    encoded_chords = encoded_chords,
                     upsample_size=upsample_size,
-                    attention_mask=None,
-                    encoder_attention_mask=encoder_attention_mask,
-                    beat_attention_mask = beat_attention_mask,
-                    chord_attention_mask = chord_attention_mask
                 )
             else:
                 latents = upsample_block(

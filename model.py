@@ -304,7 +304,7 @@ class MusicAudioDiffusion(nn.Module):
         num_train_timesteps = self.noise_scheduler.num_train_timesteps
         self.noise_scheduler.set_timesteps(num_train_timesteps, device=device)
 
-        encoder_hidden_states, boolean_encoder_mask = self.encode_text(prompt)
+        encoded_prompts, boolean_encoder_mask = self.encode_text(prompt)
 
         # with torch.no_grad():
         encoded_beats, beat_mask = self.encode_beats(
@@ -332,12 +332,9 @@ class MusicAudioDiffusion(nn.Module):
         model_pred = self.unet(
             noisy_latents,
             timesteps,
-            encoder_hidden_states,
+            encoded_prompts,
             encoded_beats,
             encoded_chords,
-            encoder_attention_mask=boolean_encoder_mask,
-            beat_attention_mask=beat_mask,
-            chord_attention_mask=chord_mask
         )
 
         if self.snr_gamma is None:

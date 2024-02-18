@@ -33,8 +33,6 @@ class BasicTransformerBlock(nn.Module):
         attention_head_dim: int,
         dropout=0.0,
         cross_attention_dim: Optional[int] = None,
-        activation_fn: str = "geglu",
-        upcast_attention: bool = False,
         norm_elementwise_affine: bool = True,
     ):
         super().__init__()
@@ -47,21 +45,19 @@ class BasicTransformerBlock(nn.Module):
             dropout=dropout,
             bias=False,
             cross_attention_dim=None,
-            upcast_attention=upcast_attention,
         )
 
-        self.ff = FeedForward(dim, dropout=dropout, activation_fn=activation_fn, final_dropout=False)
+        self.ff = FeedForward(dim, dropout=dropout, final_dropout=False)
 
         # 2. Cross-Attn
         if cross_attention_dim is not None:
             self.attn2 = Attention(
                 query_dim=dim,
-                cross_attention_dim=cross_attention_dim,
                 heads=num_attention_heads,
                 dim_head=attention_head_dim,
                 dropout=dropout,
                 bias=False,
-                upcast_attention=upcast_attention,
+                cross_attention_dim=cross_attention_dim,
             )  # is self-attn if encoder_hidden_states is none
         else:
             self.attn2 = None
@@ -76,21 +72,15 @@ class BasicTransformerBlock(nn.Module):
     def forward(
         self,
         hidden_states: torch.FloatTensor,
-        attention_mask: Optional[torch.FloatTensor] = None,
         encoder_hidden_states: Optional[torch.FloatTensor] = None,
-        encoder_attention_mask: Optional[torch.FloatTensor] = None,
-        cross_attention_kwargs: Dict[str, Any] = None,
     ):
         
         norm_hidden_states = self.norm1(hidden_states)
 
         # 1. Self-Attention
-        cross_attention_kwargs = cross_attention_kwargs if cross_attention_kwargs is not None else {}
         attn_output = self.attn1(
             norm_hidden_states,
             encoder_hidden_states=None,
-            attention_mask=attention_mask,
-            **cross_attention_kwargs,
         )
         
         hidden_states = attn_output + hidden_states
@@ -104,8 +94,6 @@ class BasicTransformerBlock(nn.Module):
             attn_output = self.attn2(
                 norm_hidden_states,
                 encoder_hidden_states=encoder_hidden_states,
-                attention_mask=encoder_attention_mask,
-                **cross_attention_kwargs,
             )
             # print (f"attn output {attn_output.shape}, hidden states {hidden_states.shape}")
             hidden_states = attn_output + hidden_states
@@ -161,7 +149,6 @@ class FeedForward(nn.Module):
         dim_out: Optional[int] = None,
         mult: int = 4,
         dropout: float = 0.0,
-        activation_fn: str = "geglu",
         final_dropout: bool = False,
     ):
         super().__init__()
@@ -209,17 +196,12 @@ class Attention(nn.Module):
         dim_head: int = 64,
         dropout: float = 0.0,
         bias=False,
-        upcast_attention: bool = False,
-        norm_num_groups: Optional[int] = None,
-        out_bias: bool = True,
-        scale_qk: bool = True,
     ):
         super().__init__()
         inner_dim = dim_head * heads
         cross_attention_dim = cross_attention_dim if cross_attention_dim is not None else query_dim
-        self.upcast_attention = upcast_attention
 
-        self.scale = dim_head**-0.5 if scale_qk else 1.0
+        self.scale = dim_head**-0.5
 
         self.heads = heads
         # for slice_size > 0 the attention score computation
@@ -227,31 +209,22 @@ class Attention(nn.Module):
         # You can set slice_size with `set_attention_slice`
         self.sliceable_head_dim = heads
 
-        if norm_num_groups is not None:
-            self.group_norm = nn.GroupNorm(num_channels=inner_dim, num_groups=norm_num_groups, eps=1e-5, affine=True)
-        else:
-            self.group_norm = None
-
         self.to_q = nn.Linear(query_dim, inner_dim, bias=bias)
         self.to_k = nn.Linear(cross_attention_dim, inner_dim, bias=bias)
         self.to_v = nn.Linear(cross_attention_dim, inner_dim, bias=bias)
 
         self.to_out = nn.ModuleList([])
-        self.to_out.append(nn.Linear(inner_dim, query_dim, bias=out_bias))
+        self.to_out.append(nn.Linear(inner_dim, query_dim, bias=True))
         self.to_out.append(nn.Dropout(dropout))
 
-    def forward(self, hidden_states, encoder_hidden_states=None, attention_mask=None, **cross_attention_kwargs):
+    def forward(self, 
+                hidden_states, 
+                encoder_hidden_states=None,):
         
         batch_size, sequence_length, _ = (
             hidden_states.shape if encoder_hidden_states is None else encoder_hidden_states.shape
         )
         inner_dim = hidden_states.shape[-1]
-
-        if attention_mask is not None:
-            attention_mask = self.prepare_attention_mask(attention_mask, sequence_length, batch_size)
-            # scaled_dot_product_attention expects attention_mask shape to be
-            # (batch, heads, source_length, target_length)
-            attention_mask = attention_mask.view(batch_size, self.heads, -1, attention_mask.shape[-1])
 
         query = self.to_q(hidden_states)
 
@@ -267,7 +240,7 @@ class Attention(nn.Module):
         value = value.view(batch_size, -1, self.heads, head_dim).transpose(1, 2)
 
         hidden_states = F.scaled_dot_product_attention(
-            query, key, value, attn_mask=attention_mask, dropout_p=0.0, is_causal=False
+            query, key, value, dropout_p=0.0, is_causal=False
         )
 
         hidden_states = hidden_states.transpose(1, 2).reshape(batch_size, -1, self.heads * head_dim)
@@ -293,9 +266,9 @@ class Attention(nn.Module):
 
     def get_attention_scores(self, query, key, attention_mask=None):
         dtype = query.dtype
-        if self.upcast_attention:
-            query = query.float()
-            key = key.float()
+       
+        query = query.float()
+        key = key.float()
 
         if attention_mask is None:
             baddbmm_input = torch.empty(

@@ -105,6 +105,7 @@ def main():
         accelerator='gpu',
         strategy='ddp_find_unused_parameters_true',
         devices=config.trainer_config['devices'],
+        precision=16,
         # logger=tb_logger,
         # callbacks=[checkpoint_callback],
         max_epochs=config.trainer_config['max_epochs'],
