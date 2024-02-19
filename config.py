@@ -5,7 +5,7 @@ data_config = {
 }
 
 pretrained_configs = {
-    "text_encoder":"google/flan-t5-large",
+    "text_encoder":"t5-large",
     "audio_ldm":"audioldm-s-full",
     "ddpm_scheduler":"stabilityai/stable-diffusion-2-1"
 }
@@ -50,6 +50,6 @@ module_config = {
 
 trainer_config = {
     "max_epochs":40,
-    "devices":[1]
+    "devices":-1
 }
 

@@ -4,8 +4,6 @@ import pytorch_lightning as pl
 from model_utils import build_pretrained_models
 import math
 import soundfile as sf
-import tqdm
-import random
 import torch.nn.functional as F
 from unet.embeddings import FundamentalMusicEmbedding, MusicPositionalEncoding, BeatEmbedding, ChordEmbedding, BeatTokenizer, ChordTokenizer
 from tools import torch_tools
@@ -22,13 +20,8 @@ from diffusers.schedulers.scheduling_ddpm import DDPMScheduler
 class LatentMusicDiffusionModel(pl.LightningModule):
     def __init__(self, config):
         super().__init__()
-        pretrained_model_name = "audioldm-s-full"
-
         self.config = config
-        self.vae, self.stft = build_pretrained_models(pretrained_model_name)
-        self.vae.eval()
-        self.stft.eval()
-
+       
         self.model = MusicAudioDiffusion(
             config.pretrained_configs['text_encoder'],
             config.pretrained_configs['ddpm_scheduler'],
@@ -36,9 +29,6 @@ class LatentMusicDiffusionModel(pl.LightningModule):
         )
 
         self.sample_gen = SampleGeneration(
-            self.device,
-            self.vae,
-            self.stft,
             self.model
         )
 
@@ -82,56 +72,60 @@ class LatentMusicDiffusionModel(pl.LightningModule):
 
     def forward(self,
                 true_latent,
-                text, beats,
+                encoded_text, beats,
                 chords, chords_time,
                 validation_mode=False):
-        return self.model(true_latent, text, beats, chords, chords_time, validation_mode=validation_mode)
+        true_latent = true_latent.half().to(self.device)
+        encoded_text = encoded_text.to(self.device)
+        return self.model(true_latent, encoded_text, beats, chords, chords_time, validation_mode=validation_mode)
 
     def training_step(self, batch, batch_idx):
-        device = self.device
-        target_length = int(10 * 102.4)
-
-        text, audios, beats, chords, chords_time, _ = batch
+        texts, text_encoding_paths, audios, latent_paths, beats, chords, chords_time, _ = batch
 
         batch_size = len(audios)
 
-        with torch.no_grad():
-            mel, _, waveform = torch_tools.wav_to_fbank(
-                audios,
-                target_length,
-                self.stft
-            )
-            # batch, 1, time, freq; [2, 1, 1024, 64]
-            mel = mel.unsqueeze(1).to(device)
-            # batch, channels, time_compressed, freq_compressed [2, 8, 256, 16]
-            true_latent = self.vae.get_first_stage_encoding(
-                self.vae.encode_first_stage(mel))
+        loaded_latents = []
+        for latent_path in latent_paths:
+            latent = torch.load(latent_path)
+            loaded_latents.append(latent.squeeze(0))
 
-        loss = self.forward(true_latent, text, beats, chords,
+        true_latents = torch.stack(loaded_latents)
+
+        loaded_encodings = []
+        for encoding_path in text_encoding_paths:
+            encoding = torch.load(encoding_path)
+            loaded_encodings.append(encoding['encoder_hidden_states'].squeeze(0))
+
+        text_encodings = torch.stack(loaded_encodings)
+
+        loss = self.forward(true_latents, text_encodings, beats, chords,
                             chords_time, validation_mode=False)
         self.log('train_loss', loss, on_step=False, on_epoch=True,
                  prog_bar=True, logger=True, sync_dist=True, batch_size=batch_size)
         return loss
 
     def validation_step(self, batch, batch_idx):
-        device = self.device
-        text, audios, beats, chords, chords_time, _ = batch
-        target_length = int(10 * 102.4)
+        texts, text_encoding_paths, audios, latent_paths, beats, chords, chords_time, _ = batch
 
         batch_size = len(audios)
 
-        mel, _, waveform = torch_tools.wav_to_fbank(
-            audios,
-            target_length,
-            self.stft
-        )
-        mel = mel.unsqueeze(1).to(device)
-        true_latent = self.vae.get_first_stage_encoding(
-            self.vae.encode_first_stage(mel)
-        )
+        loaded_latents = []
+        for latent_path in latent_paths:
+            latent = torch.load(latent_path)
+            loaded_latents.append(latent.squeeze(0))
+
+        true_latents = torch.stack(loaded_latents)
+
+        loaded_encodings = []
+        for encoding_path in text_encoding_paths:
+            encoding = torch.load(encoding_path)
+            loaded_encodings.append(encoding['encoder_hidden_states'].squeeze(0))
+
+        text_encodings = torch.stack(loaded_encodings)
+                
         val_loss = self.forward(
-            true_latent,
-            text,
+            true_latents,
+            text_encodings,
             beats,
             chords,
             chords_time,
@@ -161,7 +155,7 @@ class LatentMusicDiffusionModel(pl.LightningModule):
 
             if self.current_epoch % 5 == 0:
                 print(f"Generating for {prompt}")
-                wav = self.sample_gen.generate(prompt)
+                wav = self.sample_gen.generate(self.device, prompt)
                 out = f"./tmp/output_{self.current_epoch}.wav"
                 sf.write(out, wav, samplerate=16000)
 
@@ -200,9 +194,15 @@ class MusicAudioDiffusion(nn.Module):
         # https://huggingface.co/docs/diffusers/v0.14.0/en/api/schedulers/overview
         self.noise_scheduler = DDPMScheduler.from_pretrained(
             self.scheduler_name, subfolder="scheduler")
-        self.tokenizer = AutoTokenizer.from_pretrained(self.text_encoder_name)
-        self.text_encoder = T5EncoderModel.from_pretrained(
-            self.text_encoder_name)
+        
+        # self.tokenizer = AutoTokenizer.from_pretrained(self.text_encoder_name)
+        # self.text_encoder = T5EncoderModel.from_pretrained(
+        #     self.text_encoder_name)
+        
+        # for param in self.text_encoder.parameters():
+        #     param.requires_grad = False
+        
+        # self.text_encoder.eval()
 
         self.unet = UNet(unet_config)
 
@@ -299,12 +299,10 @@ class MusicAudioDiffusion(nn.Module):
         return embedded_chord, out_mask
         # return out_chord_root, out_mask
 
-    def forward(self, latents, prompt, beats, chords, chords_time, validation_mode=False):
-        device = self.text_encoder.device
+    def forward(self, latents, encoded_prompts, beats, chords, chords_time, validation_mode=False):
+        device = latents.device
         num_train_timesteps = self.noise_scheduler.num_train_timesteps
         self.noise_scheduler.set_timesteps(num_train_timesteps, device=device)
-
-        encoded_prompts, boolean_encoder_mask = self.encode_text(prompt)
 
         # with torch.no_grad():
         encoded_beats, beat_mask = self.encode_beats(
@@ -359,46 +357,38 @@ class MusicAudioDiffusion(nn.Module):
 
     @torch.no_grad()
     def inference(self,
-                  prompt,
+                  encoded_prompts,
                   beats,
                   chords,
                   chords_time,
                   inference_scheduler,
                   device,
                   num_steps=20,
-                  num_samples_per_prompt=1,
-                  disable_progress=True):
-        device = self.text_encoder.device
+                  num_samples_per_prompt=1,):
+        
+        device = encoded_prompts.device
 
-        batch_size = len(prompt) * num_samples_per_prompt
+        batch_size = encoded_prompts.shape[0] * num_samples_per_prompt
 
-        prompt_embeds, boolean_prompt_mask = self.encode_text(prompt)
-        prompt_embeds = prompt_embeds.repeat_interleave(
-            num_samples_per_prompt, 0)
-        boolean_prompt_mask = boolean_prompt_mask.repeat_interleave(
+        encoded_prompts = encoded_prompts.repeat_interleave(
             num_samples_per_prompt, 0)
 
         encoded_beats, beat_mask = self.encode_beats(
             beats, device)  # batch, len_beats, dim; batch, len_beats
         encoded_beats = encoded_beats.repeat_interleave(
             num_samples_per_prompt, 0)
-        beat_mask = beat_mask.repeat_interleave(num_samples_per_prompt, 0)
 
         encoded_chords, chord_mask = self.encode_chords(
             chords, chords_time, device)
         encoded_chords = encoded_chords.repeat_interleave(
             num_samples_per_prompt, 0)
-        chord_mask = chord_mask.repeat_interleave(num_samples_per_prompt, 0)
 
         inference_scheduler.set_timesteps(num_steps, device=device)
         timesteps = inference_scheduler.timesteps
 
         num_channels_latents = self.unet.in_channels
         latents = self.prepare_latents(
-            batch_size, inference_scheduler, num_channels_latents, prompt_embeds.dtype, device)
-
-        num_warmup_steps = len(timesteps) - num_steps * \
-            inference_scheduler.order
+            batch_size, inference_scheduler, num_channels_latents, encoded_prompts.dtype, device)
 
         for i, t in enumerate(timesteps):
 
@@ -406,9 +396,11 @@ class MusicAudioDiffusion(nn.Module):
                 latents, t)
 
             noise_pred = self.unet(
-                latent_model_input, t, encoder_hidden_states=prompt_embeds,
-                encoder_attention_mask=boolean_prompt_mask,
-                beat_features=encoded_beats, beat_attention_mask=beat_mask, chord_features=encoded_chords, chord_attention_mask=chord_mask
+                latent_model_input, 
+                t, 
+                encoded_prompts=encoded_prompts,
+                encoded_beats=encoded_beats, 
+                encoded_chords=encoded_chords,
             )
 
             # compute the previous noisy sample x_t -> x_t-1

@@ -8,16 +8,17 @@ from model import LatentMusicDiffusionModel
 from datasets import load_dataset
 from torch.utils.data import Dataset, DataLoader
 
+os.environ["TOKENIZERS_PARALLELISM"] = "false"
 
 class Text2AudioDataset(Dataset):
     def __init__(self, dataset, text_column, audio_column, beats_column, chords_column, chords_time_column):
 
-        self.inputs = list(dataset[text_column])[:16]
-        self.audios = list(dataset[audio_column])[:16]
-        self.beats = list(dataset[beats_column])[:16]
-        self.chords = list(dataset[chords_column])[:16]
-        self.chords_time = list(dataset[chords_time_column])[:16]
-        self.indices = list(range(len(self.inputs)))[:16]
+        self.inputs = list(dataset[text_column])
+        self.audios = list(dataset[audio_column])
+        self.beats = list(dataset[beats_column])
+        self.chords = list(dataset[chords_column])
+        self.chords_time = list(dataset[chords_time_column])
+        self.indices = list(range(len(self.inputs)))
 
         self.mapper = {}
         for index, audio, text, beats, chords in zip(self.indices, self.audios, self.inputs, self.beats, self.chords):
@@ -30,9 +31,12 @@ class Text2AudioDataset(Dataset):
         return len(self.inputs)
 
     def __getitem__(self, index):
-        s1, s2, s3, s4, s5, s6 = self.inputs[index], self.audios[index], self.beats[index], self.chords[index], self.chords_time[index], self.indices[index]
-        s2 = '/data/tilak/projects/mustango/data/datashare/'+s2
-        return s1, s2, s3, s4, s5, s6
+        s1, s2, s3, s4, s5, s6, s7, s8 = self.inputs[index], None, self.audios[index], None, self.beats[index], self.chords[index], self.chords_time[index], self.indices[index]
+        s3 = '/data/tilak/projects/mustango/data/datashare/'+s3
+        base_name = os.path.splitext(os.path.basename(s3))[0]
+        s2 = f'/data/tilak/projects/mustango/data/encoded_prompts/{base_name}_prompt_encoding.pt'
+        s4 = f'/data/tilak/projects/mustango/data/latents/{base_name}_latent.pt'
+        return s1, s2, s3, s4, s5, s6, s7, s8
 
     def collate_fn(self, data):
         dat = pd.DataFrame(data)
@@ -104,10 +108,10 @@ def main():
     trainer = Trainer(
         accelerator='gpu',
         strategy='ddp_find_unused_parameters_true',
-        devices=config.trainer_config['devices'],
         precision=16,
-        # logger=tb_logger,
-        # callbacks=[checkpoint_callback],
+        devices=config.trainer_config['devices'],
+        logger=tb_logger,
+        callbacks=[checkpoint_callback],
         max_epochs=config.trainer_config['max_epochs'],
         gradient_clip_val=1.0,
         log_every_n_steps=50,
@@ -116,7 +120,7 @@ def main():
         val_check_interval=1.0,
     )
 
-    trainer.fit(model=model, datamodule=datamodule)
+    trainer.fit(model=model, datamodule=datamodule, ckpt_path=last_checkpoint_path)
 
 if __name__ == "__main__":
     main()
