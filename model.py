@@ -23,7 +23,6 @@ class LatentMusicDiffusionModel(pl.LightningModule):
         self.config = config
        
         self.model = MusicAudioDiffusion(
-            config.pretrained_configs['text_encoder'],
             config.pretrained_configs['ddpm_scheduler'],
             config.module_config['unet'],
         )
@@ -163,7 +162,6 @@ class LatentMusicDiffusionModel(pl.LightningModule):
 class MusicAudioDiffusion(nn.Module):
     def __init__(
             self,
-            text_encoder_name,
             scheduler_name,
             unet_config,
             d_fme=1024,  # FME
@@ -177,7 +175,6 @@ class MusicAudioDiffusion(nn.Module):
             if_modulo_timing=False,
             d_beat=1024,  # Beat
             d_oh_beat_type=7,
-            beat_len=50,
             d_chord=1024,  # Chord
             d_oh_chord_type=12,
             d_oh_inv_type=4,
@@ -185,7 +182,6 @@ class MusicAudioDiffusion(nn.Module):
     ):
         super().__init__()
 
-        self.text_encoder_name = text_encoder_name
         self.scheduler_name = scheduler_name
         self.unet_config = unet_config
 
@@ -194,15 +190,6 @@ class MusicAudioDiffusion(nn.Module):
         # https://huggingface.co/docs/diffusers/v0.14.0/en/api/schedulers/overview
         self.noise_scheduler = DDPMScheduler.from_pretrained(
             self.scheduler_name, subfolder="scheduler")
-        
-        # self.tokenizer = AutoTokenizer.from_pretrained(self.text_encoder_name)
-        # self.text_encoder = T5EncoderModel.from_pretrained(
-        #     self.text_encoder_name)
-        
-        # for param in self.text_encoder.parameters():
-        #     param.requires_grad = False
-        
-        # self.text_encoder.eval()
 
         self.unet = UNet(unet_config)
 
@@ -212,7 +199,8 @@ class MusicAudioDiffusion(nn.Module):
         self.PE = MusicPositionalEncoding(
             d_model=d_pe, if_index=if_index, if_global_timing=if_global_timing, if_modulo_timing=if_modulo_timing)
         # self.PE2 = Music_PositionalEncoding(d_model = d_pe, if_index = if_index, if_global_timing = if_global_timing, if_modulo_timing = if_modulo_timing, device = self.device)
-        self.beat_tokenizer = BeatTokenizer(seq_len_beat=88, if_pad=True)
+        self.beat_tokenizer = BeatTokenizer(
+            seq_len_beat=88, if_pad=True)
         self.beat_embedding_layer = BeatEmbedding(
             self.PE, d_model=d_beat, d_oh_beat_type=d_oh_beat_type)
         self.chord_embedding_layer = ChordEmbedding(
@@ -339,8 +327,6 @@ class MusicAudioDiffusion(nn.Module):
             loss = F.mse_loss(model_pred.float(),
                               target.float(), reduction="mean")
         else:
-            # Compute loss-weights as per Section 3.4 of https://arxiv.org/abs/2303.09556.
-            # Adaptef from huggingface/diffusers/blob/main/examples/text_to_image/train_text_to_image.py
             snr = self.compute_snr(timesteps)
             mse_loss_weights = (
                 torch.stack(

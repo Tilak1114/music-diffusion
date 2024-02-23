@@ -52,13 +52,13 @@ class Datamodule(pl.LightningDataModule):
         self.test_dataset = test_dataset
 
     def train_dataloader(self) -> DataLoader:
-        return DataLoader(self.train_dataset, num_workers=self.num_workers, shuffle=True, batch_size=8, collate_fn=self.train_dataset.collate_fn)
+        return DataLoader(self.train_dataset, num_workers=self.num_workers, shuffle=True, batch_size=16, collate_fn=self.train_dataset.collate_fn)
 
     def val_dataloader(self) -> DataLoader:
-        return DataLoader(self.eval_dataset, num_workers=self.num_workers, shuffle=False, batch_size=4, collate_fn=self.eval_dataset.collate_fn)
+        return DataLoader(self.eval_dataset, num_workers=self.num_workers, shuffle=False, batch_size=8, collate_fn=self.eval_dataset.collate_fn)
     
     def test_dataloader(self) -> DataLoader:
-        return DataLoader(self.test_dataset, num_workers=self.num_workers, shuffle=False, batch_size=4, collate_fn=self.test_dataset.collate_fn)
+        return DataLoader(self.test_dataset, num_workers=self.num_workers, shuffle=False, batch_size=8, collate_fn=self.test_dataset.collate_fn)
 
 def find_latest_checkpoint(checkpoint_dir):
     checkpoint_files = [f for f in os.listdir(checkpoint_dir) if f.endswith(".ckpt")]
