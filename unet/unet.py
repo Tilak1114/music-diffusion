@@ -29,7 +29,7 @@ class UNet(nn.Module):
         self.down_blocks = nn.ModuleList()
         self.up_blocks = nn.ModuleList()
 
-        cross_attention_dim = [1024] * len(down_block_types)
+        cross_attention_dim = [512] * len(down_block_types)
         attention_head_dim = config['attention_head_dim']
 
         output_channel = block_out_channels[0]

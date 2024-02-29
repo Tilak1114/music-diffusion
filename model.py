@@ -73,7 +73,7 @@ class LatentMusicDiffusionModel(pl.LightningModule):
         loaded_vid_embs = []
         for vid_emb_path in video_embedding_paths:
             vid_emb = torch.load(vid_emb_path)
-            loaded_vid_embs.append(vid_emb.squeeze(0))
+            loaded_vid_embs.append(vid_emb)
 
         loaded_vid_embs = torch.stack(loaded_vid_embs)
 
@@ -97,7 +97,7 @@ class LatentMusicDiffusionModel(pl.LightningModule):
         loaded_vid_embs = []
         for vid_emb_path in video_embedding_paths:
             vid_emb = torch.load(vid_emb_path)
-            loaded_vid_embs.append(vid_emb.squeeze(0))
+            loaded_vid_embs.append(vid_emb)
 
         loaded_vid_embs = torch.stack(loaded_vid_embs)
 

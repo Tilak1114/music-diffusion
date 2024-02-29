@@ -221,7 +221,7 @@ class Attention(nn.Module):
                 hidden_states, 
                 encoder_hidden_states=None,):
         
-        batch_size = (
+        batch_size, _, _ = (
             hidden_states.shape if encoder_hidden_states is None else encoder_hidden_states.shape
         )
         inner_dim = hidden_states.shape[-1]
