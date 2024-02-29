@@ -85,7 +85,7 @@ class BasicTransformerBlock(nn.Module):
         
         hidden_states = attn_output + hidden_states
 
-        if self.attn2 is not None:
+        if self.attn2 is not None and encoder_hidden_states is not None:
             norm_hidden_states = (
                self.norm2(hidden_states)
             )
@@ -221,7 +221,7 @@ class Attention(nn.Module):
                 hidden_states, 
                 encoder_hidden_states=None,):
         
-        batch_size, sequence_length, _ = (
+        batch_size = (
             hidden_states.shape if encoder_hidden_states is None else encoder_hidden_states.shape
         )
         inner_dim = hidden_states.shape[-1]

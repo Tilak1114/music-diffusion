@@ -117,9 +117,7 @@ class UNet(nn.Module):
     def forward(self,
                 latents: torch.FloatTensor,
                 timesteps,
-                encoded_prompts: torch.Tensor,
-                encoded_beats: torch.Tensor,
-                encoded_chords: torch.Tensor,):
+                vid_emb: torch.Tensor = None):
 
         timestep_embedding = self.time_step_embedding(timesteps)
         latents = self.pre_encoder_conv(latents)
@@ -132,9 +130,7 @@ class UNet(nn.Module):
                 latents, res_samples = downsample_block(
                     hidden_states=latents,
                     temb=timestep_embedding,
-                    encoded_prompts=encoded_prompts,
-                    encoded_beats=encoded_beats,
-                    encoded_chords=encoded_chords,
+                    vid_emb=vid_emb,
                 )
             else:
                 latents, res_samples = downsample_block(
@@ -146,9 +142,7 @@ class UNet(nn.Module):
 
         latents = self.mid_block(
             latents, timestep_embedding,
-            encoded_prompts=encoded_prompts,
-            encoded_beats=encoded_beats,
-            encoded_chords=encoded_chords,)
+            vid_emb=vid_emb)
 
         # UP
         for i, upsample_block in enumerate(self.up_blocks):
@@ -167,9 +161,7 @@ class UNet(nn.Module):
                     hidden_states=latents,
                     temb=timestep_embedding,
                     res_hidden_states_tuple=res_samples,
-                    encoded_prompts=encoded_prompts,
-                    encoded_beats = encoded_beats,
-                    encoded_chords = encoded_chords,
+                    vid_emb=vid_emb,
                     upsample_size=upsample_size,
                 )
             else:

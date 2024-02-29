@@ -34,10 +34,10 @@ module_config = {
             "DownBlock2D"
         ],
         "attention_head_dim": [
-            5,
-            10,
-            20,
-            20
+            4,
+            8,
+            16,
+            16
         ],
         "up_block_types": [
             "UpBlock2D",
@@ -50,6 +50,6 @@ module_config = {
 
 trainer_config = {
     "max_epochs":70,
-    "devices":[1, 2, 3]
+    "devices":[1]
 }
 

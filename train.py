@@ -1,126 +1,139 @@
 import os
 import pytorch_lightning as pl
 import config
+import torch
 from pytorch_lightning import Trainer, loggers, callbacks
 import pandas as pd
+from sklearn.model_selection import train_test_split
+from torch.utils.data import DataLoader
+import pytorch_lightning as pl
 from model import LatentMusicDiffusionModel
-
-from datasets import load_dataset
 from torch.utils.data import Dataset, DataLoader
 
 os.environ["TOKENIZERS_PARALLELISM"] = "false"
 
-class Text2AudioDataset(Dataset):
-    def __init__(self, dataset, text_column, audio_column, beats_column, chords_column, chords_time_column):
+class MusicVideoDataset(Dataset):
+	def __init__(self, csv_file,):
+		self.data_frame = pd.read_csv(csv_file)
+		self.latent_path = "/data/tilak/scripts/master_data/data/latents"
+		self.vid_emb_path = "/data/tilak/scripts/master_data/data/video_embeddings"
 
-        self.inputs = list(dataset[text_column])
-        self.audios = list(dataset[audio_column])
-        self.beats = list(dataset[beats_column])
-        self.chords = list(dataset[chords_column])
-        self.chords_time = list(dataset[chords_time_column])
-        self.indices = list(range(len(self.inputs)))
+	def __len__(self):
+		return len(self.data_frame)
 
-        self.mapper = {}
-        for index, audio, text, beats, chords in zip(self.indices, self.audios, self.inputs, self.beats, self.chords):
-            self.mapper[index] = [audio, text, beats, chords]
+	def __getitem__(self, idx):
+		row = self.data_frame.iloc[idx]
+		audio_file = row['Audio File Name'][:-4]
+		audio_start = row['Audio Start Time']
+		audio_end = row['Audio End Time']
+		video_file = row['Video File Name'][:-4]
+		video_start = row['Video Start Time']
+		video_end = row['Video End Time']
+		is_video = row['isVideo']
 
-    def __len__(self):
-        return len(self.inputs)
+		audio_latent_path = f"{self.latent_path}/{audio_file}_{audio_start}_{audio_end}_latent.pt"
+		
+		if is_video:
+			video_emb_path = f"{self.vid_emb_path}/{video_file}_{video_start}_{video_end}_embedding.pt"
+		else:
+			video_emb_path = f"{self.vid_emb_path}/{video_file}_0_30_embedding.pt"
 
-    def get_num_instances(self):
-        return len(self.inputs)
-
-    def __getitem__(self, index):
-        s1, s2, s3, s4, s5, s6, s7, s8 = self.inputs[index], None, self.audios[index], None, self.beats[index], self.chords[index], self.chords_time[index], self.indices[index]
-        s3 = '/data/tilak/projects/mustango/data/datashare/'+s3
-        base_name = os.path.splitext(os.path.basename(s3))[0]
-        s2 = f'/data/tilak/projects/mustango/data/encoded_prompts/{base_name}_prompt_encoding.pt'
-        s4 = f'/data/tilak/projects/mustango/data/latents/{base_name}_latent.pt'
-        return s1, s2, s3, s4, s5, s6, s7, s8
-
-    def collate_fn(self, data):
-        dat = pd.DataFrame(data)
-        return [dat[i].tolist() for i in dat]
+		return audio_latent_path, video_emb_path
 
 
-class Datamodule(pl.LightningDataModule):
-    def __init__(self, train_dataset, eval_dataset, test_dataset, num_workers=36):
-        super().__init__()
-        self.num_workers = num_workers
-        self.train_dataset = train_dataset
-        self.eval_dataset = eval_dataset
-        self.test_dataset = test_dataset
+class DataModule(pl.LightningDataModule):
+	def __init__(self, 
+				 csv_file, 
+				 batch_size=16, 
+				 test_size=0.025, 
+				 val_size=0.025):
+		super().__init__()
+		self.csv_file = csv_file
+		self.batch_size = batch_size
+		self.test_size = test_size
+		self.val_size = val_size / (1 - test_size)  # Adjust val_size based on test_size to maintain proportion after test split
 
-    def train_dataloader(self) -> DataLoader:
-        return DataLoader(self.train_dataset, num_workers=self.num_workers, shuffle=True, batch_size=16, collate_fn=self.train_dataset.collate_fn)
+	def setup(self, stage=None):
+		# Load the dataset
+		full_dataset = MusicVideoDataset(
+			csv_file=self.csv_file,)
+		
+		# Split data into train+val and test sets
+		train_val_indices, test_indices = train_test_split(range(len(full_dataset)), 
+														   test_size=self.test_size,
+															random_state=42)
+		train_val_dataset = torch.utils.data.Subset(full_dataset, 
+													train_val_indices)
+		self.test_dataset = torch.utils.data.Subset(full_dataset, 
+													test_indices)
+		
+		# Split train+val into train and val sets
+		train_indices, val_indices = train_test_split(range(len(train_val_dataset)), test_size=self.val_size, random_state=42)
+		self.train_dataset = torch.utils.data.Subset(train_val_dataset, train_indices)
+		self.val_dataset = torch.utils.data.Subset(train_val_dataset, val_indices)
 
-    def val_dataloader(self) -> DataLoader:
-        return DataLoader(self.eval_dataset, num_workers=self.num_workers, shuffle=False, batch_size=8, collate_fn=self.eval_dataset.collate_fn)
-    
-    def test_dataloader(self) -> DataLoader:
-        return DataLoader(self.test_dataset, num_workers=self.num_workers, shuffle=False, batch_size=8, collate_fn=self.test_dataset.collate_fn)
+	def train_dataloader(self):
+		return DataLoader(
+			self.train_dataset, 
+			batch_size=self.batch_size, 
+			shuffle=True
+			)
+
+	def val_dataloader(self):
+		return DataLoader(
+			self.val_dataset, 
+			batch_size=self.batch_size
+			)
+
+	def test_dataloader(self):
+		return DataLoader(
+			self.test_dataset, 
+			batch_size=self.batch_size
+			)
+
 
 def find_latest_checkpoint(checkpoint_dir):
-    checkpoint_files = [f for f in os.listdir(checkpoint_dir) if f.endswith(".ckpt")]
-    if not checkpoint_files:
-        return None
-    
-    return os.path.join(checkpoint_dir, checkpoint_files[0])
+	checkpoint_files = [f for f in os.listdir(checkpoint_dir) if f.endswith(".ckpt")]
+	if not checkpoint_files:
+		return None
+	
+	return os.path.join(checkpoint_dir, checkpoint_files[0])
 
 def main():
-    raw_datasets = load_dataset('json', data_files=config.data_config)
-    text_column, audio_column, beats_column, chords_column, chords_time_column = "main_caption", "location", "beats", "chords", "chords_time"
+	
+	datamodule = DataModule(csv_file="/data/tilak/scripts/master_data/final2.csv")
+	datamodule.setup()
 
-    train_dataset = Text2AudioDataset(
-        raw_datasets["train_file_path"], 
-        text_column, audio_column, 
-        beats_column, chords_column, 
-        chords_time_column)
-    eval_dataset = Text2AudioDataset(
-        raw_datasets["val_file_path"], 
-        text_column, audio_column, 
-        beats_column, chords_column, 
-        chords_time_column)
-    test_dataset = Text2AudioDataset(
-        raw_datasets["test_file_path"], 
-        text_column, audio_column, 
-        beats_column, chords_column, 
-        chords_time_column)
-    
-    datamodule = Datamodule(train_dataset=train_dataset, 
-                            eval_dataset=eval_dataset, 
-                            test_dataset=test_dataset)
+	model = LatentMusicDiffusionModel(config)
 
-    model = LatentMusicDiffusionModel(config)
+	tb_logger = loggers.TensorBoardLogger('./logs/')
 
-    tb_logger = loggers.TensorBoardLogger('./logs/')
+	checkpoint_callback = callbacks.ModelCheckpoint(
+		dirpath='./checkpoints/',
+		filename="{epoch:02d}",
+		every_n_epochs=1
+	)
 
-    checkpoint_callback = callbacks.ModelCheckpoint(
-        dirpath='./checkpoints/',
-        filename="{epoch:02d}",
-        every_n_epochs=1
-    )
+	last_checkpoint_path = find_latest_checkpoint(
+		'./checkpoints/'
+	)
 
-    last_checkpoint_path = find_latest_checkpoint(
-        './checkpoints/'
-    )
+	trainer = Trainer(
+		accelerator='gpu',
+		strategy='ddp_find_unused_parameters_true',
+		precision=16,
+		devices=config.trainer_config['devices'],
+		logger=tb_logger,
+		callbacks=[checkpoint_callback],
+		max_epochs=config.trainer_config['max_epochs'],
+		gradient_clip_val=1.0,
+		log_every_n_steps=50,
+		enable_progress_bar=True,
+		limit_val_batches=100,
+		val_check_interval=1.0,
+	)
 
-    trainer = Trainer(
-        accelerator='gpu',
-        strategy='ddp_find_unused_parameters_true',
-        precision=16,
-        devices=config.trainer_config['devices'],
-        logger=tb_logger,
-        callbacks=[checkpoint_callback],
-        max_epochs=config.trainer_config['max_epochs'],
-        gradient_clip_val=1.0,
-        log_every_n_steps=50,
-        enable_progress_bar=True,
-        limit_val_batches=100,
-        val_check_interval=1.0,
-    )
-
-    trainer.fit(model=model, datamodule=datamodule, ckpt_path=last_checkpoint_path)
+	trainer.fit(model=model, datamodule=datamodule, ckpt_path=last_checkpoint_path)
 
 if __name__ == "__main__":
-    main()
+	main()
