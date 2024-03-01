@@ -231,6 +231,8 @@ class Attention(nn.Module):
         if encoder_hidden_states is None:
             encoder_hidden_states = hidden_states
 
+        encoder_hidden_states = encoder_hidden_states.to(dtype=self.to_k.weight.dtype)
+
         key = self.to_k(encoder_hidden_states)
         value = self.to_v(encoder_hidden_states)
 

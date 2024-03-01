@@ -9,6 +9,7 @@ from torch.utils.data import DataLoader
 import pytorch_lightning as pl
 from model import LatentMusicDiffusionModel
 from torch.utils.data import Dataset, DataLoader
+from model_utils import build_pretrained_models
 
 os.environ["TOKENIZERS_PARALLELISM"] = "false"
 
@@ -82,13 +83,13 @@ class DataModule(pl.LightningDataModule):
 	def val_dataloader(self):
 		return DataLoader(
 			self.val_dataset, 
-			batch_size=self.batch_size
+			batch_size=self.batch_size//2
 			)
 
 	def test_dataloader(self):
 		return DataLoader(
 			self.test_dataset, 
-			batch_size=self.batch_size
+			batch_size=self.batch_size//2
 			)
 
 
@@ -121,7 +122,6 @@ def main():
 	trainer = Trainer(
 		accelerator='gpu',
 		strategy='ddp_find_unused_parameters_true',
-		precision=16,
 		devices=config.trainer_config['devices'],
 		logger=tb_logger,
 		callbacks=[checkpoint_callback],

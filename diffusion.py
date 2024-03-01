@@ -6,6 +6,7 @@ import torch.nn as nn
 import torch.nn.functional as F
 from einops import rearrange, repeat
 from torch import Tensor
+from model_utils import build_pretrained_models
 from tqdm import tqdm
 
 
@@ -71,48 +72,54 @@ class VDiffusion(nn.Module):
         return loss
 
 
-class LinearSchedule(nn.Module):
-    def __init__(self, start: float = 1.0, end: float = 0.0):
-        super().__init__()
-        self.start, self.end = start, end
-
-    def forward(self, num_steps: int, device: Any) -> Tensor:
-        return torch.linspace(self.start, self.end, num_steps, device=device)
-
-
-class VSampler(nn.Module):
-
-    def __init__(self, net: nn.Module,
-                 schedule=LinearSchedule()):
+class VSampler:
+    def __init__(self, net: nn.Module):
         super().__init__()
         self.net = net
-        self.schedule = schedule
+        pretrained_model_name = "audioldm-s-full"
+
+        self.vae, self.stft = build_pretrained_models(pretrained_model_name)
+
+        self.vae.eval()
+        self.stft.eval()
 
     def get_alpha_beta(self, sigmas: Tensor) -> Tuple[Tensor, Tensor]:
         angle = sigmas * pi / 2
         alpha, beta = torch.cos(angle), torch.sin(angle)
         return alpha, beta
 
-    @torch.no_grad()
-    def forward(  # type: ignore
-        self, x_noisy: Tensor,
-        num_steps: int,
-        show_progress: bool = False
-    ) -> Tensor:
-        b = x_noisy.shape[0]
-        sigmas = self.schedule(num_steps + 1, device=x_noisy.device)
-        sigmas = repeat(sigmas, "i -> i b", b=b)
-        sigmas_batch = extend_dim(sigmas, dim=x_noisy.ndim + 1)
-        alphas, betas = self.get_alpha_beta(sigmas_batch)
-        progress_bar = tqdm(range(num_steps),
-                            disable=not show_progress)
+    def generate_latents(
+            self, vid_emb,
+            device,
+            num_steps: int = 100,
+            show_progress: bool = False):
 
-        for i in progress_bar:
-            v_pred = self.net(x_noisy, sigmas[i])
-            x_pred = alphas[i] * x_noisy - betas[i] * v_pred
-            noise_pred = betas[i] * x_noisy + alphas[i] * v_pred
-            x_noisy = alphas[i + 1] * x_pred + betas[i + 1] * noise_pred
-            progress_bar.set_description(
-                f"Sampling (noise={sigmas[i+1, 0]:.2f})")
+        noise_shape = (len(vid_emb), 8, 256, 16)
+        x_noisy = torch.randn(noise_shape).to(device)
+        vid_emb = vid_emb.to(device)
 
-        return x_noisy
+        with torch.no_grad():
+            b = x_noisy.shape[0]
+            sigmas = torch.linspace(
+                1.0, 0.0, num_steps+1, device=x_noisy.device)
+            sigmas = repeat(sigmas, "i -> i b", b=b)
+            sigmas_batch = extend_dim(sigmas, dim=x_noisy.ndim + 1)
+            alphas, betas = self.get_alpha_beta(sigmas_batch)
+            progress_bar = tqdm(range(num_steps),
+                                disable=not show_progress)
+
+            for i in progress_bar:
+                v_pred = self.net(x_noisy, sigmas[i], vid_emb)
+                x_pred = alphas[i] * x_noisy - betas[i] * v_pred
+                noise_pred = betas[i] * x_noisy + alphas[i] * v_pred
+                x_noisy = alphas[i + 1] * x_pred + betas[i + 1] * noise_pred
+                progress_bar.set_description(
+                    f"Sampling (noise={sigmas[i+1, 0]:.2f})")
+
+        return self.latents_to_wave(x_noisy)
+
+    def latents_to_wave(self, latents):
+        self.vae = self.vae.to(latents.device)
+        mel = self.vae.decode_first_stage(latents)
+        wave = self.vae.decode_to_waveform(mel)
+        return wave

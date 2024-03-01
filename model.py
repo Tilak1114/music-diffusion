@@ -4,10 +4,12 @@ import pytorch_lightning as pl
 import soundfile as sf
 import torch.nn.functional as F
 from transformers import get_scheduler
+import os
 from sample_generation_helper import SampleGeneration
 from diffusers.utils.torch_utils import randn_tensor
 from unet import UNet
-from diffusion import UniformDistribution, VDiffusion
+from frechet_audio_distance import FrechetAudioDistance
+from diffusion import UniformDistribution, VDiffusion, VSampler
 
 
 class LatentMusicDiffusionModel(pl.LightningModule):
@@ -19,6 +21,14 @@ class LatentMusicDiffusionModel(pl.LightningModule):
         
         self.sigmas = UniformDistribution()
         self.v_diffusion = VDiffusion(self.unet, self.sigmas)
+        self.v_sampler = VSampler(self.unet)
+
+        self.frechet = FrechetAudioDistance(
+            model_name="pann",
+            use_pca=False,
+            use_activation=False,
+            verbose=False
+        )
 
     def configure_optimizers(self):
         optimizer = torch.optim.AdamW(
@@ -30,25 +40,14 @@ class LatentMusicDiffusionModel(pl.LightningModule):
             weight_decay=self.config.module_config['weight_decay'],
             eps=self.config.module_config['adam_eps']
         )
+        # lr_scheduler = get_scheduler(
+        #     name='linear',
+        #     optimizer=optimizer,
+        #     num_warmup_steps=0,
+        #     num_training_steps=35000
+        # )
 
-        lr_scheduler = get_scheduler(
-            name='linear',
-            optimizer=optimizer,
-            num_warmup_steps=0,
-            num_training_steps=35000
-        )
-
-        return {
-            "optimizer": optimizer,
-            "lr_scheduler": {
-                "scheduler": lr_scheduler,
-                "interval": "step",  # or "epoch" based on your scheduler and training loop
-                # How often to apply the scheduler. Usually, this is set to 1.
-                "frequency": 1,
-                # If your scheduler requires monitoring a value, specify it here. This field is optional and depends on your scheduler.
-                "monitor": "validation_loss",
-            }
-        }
+        return optimizer
 
     def forward(self,
                 true_latent,
@@ -122,15 +121,58 @@ class LatentMusicDiffusionModel(pl.LightningModule):
             last_loss = self.trainer.callback_metrics.get("train_loss")
             print(f"Epoch {current_epoch+1}, Train Loss: {last_loss}")
 
-            val_dataloader = self.val_dataloader()
-
-            prompt = next(iter(val_dataloader))[1]
-            prompt = "This is an instrumental jam recording of a gear showcase. There is an electric guitar with a clear sound being played with an echo pedal. It gives the recording a dreamy feeling. This track can be used to lift guitar samples with effect for a beat. The chord sequence is D, G. The beat counts to 3. The bpm is 83.0. The key of this song is D minor."
-
             if self.current_epoch % 5 == 0:
-                print(f"Generating for {prompt}")
-                wav = self.sample_gen.generate(self.device, prompt)
-                out = f"./tmp/output_{self.current_epoch}.wav"
-                sf.write(out, wav, samplerate=16000)
 
+                val_dataloader = self.val_dataloader()
+                sample_batch = next(iter(val_dataloader))
+
+                latent_paths, video_embedding_paths = sample_batch
+
+                loaded_latents = []
+                for latent_path in latent_paths:
+                    latent = torch.load(latent_path)
+                    loaded_latents.append(latent.squeeze(0))
+
+                latents = torch.stack(loaded_latents)
+
+                loaded_vid_embs = []
+                for vid_emb_path in video_embedding_paths:
+                    vid_emb = torch.load(vid_emb_path)
+                    loaded_vid_embs.append(vid_emb)
+
+                video_embeddings = torch.stack(loaded_vid_embs)
+
+                ground_truth_wav = self.v_sampler.latents_to_wave(latents)
+
+                for i, latent_path in enumerate(latent_paths):
+                    filename = os.path.splitext(os.path.basename(latent_path))[0].rsplit('_latent', 1)[0]
+                    out_dir = "./ground_truth"
+                    os.makedirs(out_dir, exist_ok=True)  # Create the directory if it doesn't exist
+                    out = f"{out_dir}/{filename}.wav"
+                    sf.write(out, ground_truth_wav[i], samplerate=16000)
+
+                wav = self.v_sampler.generate_latents(video_embeddings, self.device)
+
+                for i, video_emb_path in enumerate(video_embedding_paths):
+                    filename = os.path.splitext(os.path.basename(video_emb_path))[0].rsplit('_embedding', 1)[0]
+                    out_dir = f"./tmp/epoch_{self.current_epoch}"
+                    os.makedirs(out_dir, exist_ok=True)  # Create the directory if it doesn't exist
+                    out = f"{out_dir}/{filename}.wav"
+                    sf.write(out, wav[i], samplerate=16000)
+
+                fad_score = self.fad(
+                    background_dir='./ground_truth/',
+                    eval_dir=f"./tmp/epoch_{self.current_epoch}/"
+                )
+
+                self.log('fad', fad_score)
+                print(f"Fad Score: {fad_score}")
+
+    def fad(self, background_dir: str, eval_dir: str) -> float:
+        fad_score = self.frechet.score(
+            background_dir=background_dir,
+            eval_dir=eval_dir
+        )
+
+        return fad_score
         
