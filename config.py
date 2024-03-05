@@ -49,7 +49,7 @@ module_config = {
 }
 
 trainer_config = {
-    "max_epochs":70,
-    "devices":[1]
+    "max_epochs":75,
+    "devices":-1
 }
 

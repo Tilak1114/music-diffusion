@@ -83,13 +83,13 @@ class DataModule(pl.LightningDataModule):
 	def val_dataloader(self):
 		return DataLoader(
 			self.val_dataset, 
-			batch_size=self.batch_size//2
+			batch_size=8
 			)
 
 	def test_dataloader(self):
 		return DataLoader(
 			self.test_dataset, 
-			batch_size=self.batch_size//2
+			batch_size=8
 			)
 
 
@@ -102,7 +102,7 @@ def find_latest_checkpoint(checkpoint_dir):
 
 def main():
 	
-	datamodule = DataModule(csv_file="/data/tilak/scripts/master_data/final2.csv")
+	datamodule = DataModule(csv_file="/data/tilak/scripts/master_data/final2.csv", batch_size=32)
 	datamodule.setup()
 
 	model = LatentMusicDiffusionModel(config)

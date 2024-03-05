@@ -24,7 +24,7 @@ class LatentMusicDiffusionModel(pl.LightningModule):
         self.v_sampler = VSampler(self.unet)
 
         self.frechet = FrechetAudioDistance(
-            model_name="pann",
+            model_name="vggish",
             use_pca=False,
             use_activation=False,
             verbose=False
