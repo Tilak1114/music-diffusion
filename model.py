@@ -53,7 +53,7 @@ class LatentMusicDiffusionModel(pl.LightningModule):
                 true_latent,
                 video_embedding):
         true_latent = true_latent.half().to(self.device)
-        video_embedding = video_embedding.to(self.device)
+        video_embedding = video_embedding.to(self.device) if video_embedding != None else None
         return self.v_diffusion(true_latent, 
                           video_embedding)
 
@@ -75,6 +75,9 @@ class LatentMusicDiffusionModel(pl.LightningModule):
             loaded_vid_embs.append(vid_emb)
 
         loaded_vid_embs = torch.stack(loaded_vid_embs)
+
+        if torch.rand(1).item() < 0.1:
+            loaded_vid_embs = None
 
         loss = self.forward(true_latents, loaded_vid_embs)
         self.log('train_loss', loss, on_step=False, on_epoch=True,

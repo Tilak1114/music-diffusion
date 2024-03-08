@@ -91,6 +91,7 @@ class VSampler:
     def generate_latents(
             self, vid_emb,
             device,
+            cfg_scale = 3.0,
             num_steps: int = 100,
             show_progress: bool = False):
 
@@ -110,6 +111,10 @@ class VSampler:
 
             for i in progress_bar:
                 v_pred = self.net(x_noisy, sigmas[i], vid_emb)
+                if cfg_scale > 0:
+                    v_pred_uncoditional = self.net(x_noisy, sigmas[i], None)
+                    v_pred = torch.lerp(v_pred_uncoditional, v_pred, cfg_scale)
+                    
                 x_pred = alphas[i] * x_noisy - betas[i] * v_pred
                 noise_pred = betas[i] * x_noisy + alphas[i] * v_pred
                 x_noisy = alphas[i + 1] * x_pred + betas[i + 1] * noise_pred
