@@ -39,7 +39,7 @@ class MusicVideoDataset(Dataset):
 		else:
 			video_emb_path = f"{self.vid_emb_path}/{video_file}_0_30_embedding.pt"
 
-		return audio_latent_path, video_emb_path
+		return f'{audio_file}_{audio_start}_{audio_end}', audio_latent_path, video_emb_path
 
 
 class DataModule(pl.LightningDataModule):

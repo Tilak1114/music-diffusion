@@ -8,6 +8,7 @@ import os
 from sample_generation_helper import SampleGeneration
 from diffusers.utils.torch_utils import randn_tensor
 from unet import UNet
+from clap_metric import ClapMetric
 from frechet_audio_distance import FrechetAudioDistance
 from diffusion import UniformDistribution, VDiffusion, VSampler
 
@@ -18,7 +19,7 @@ class LatentMusicDiffusionModel(pl.LightningModule):
         self.config = config
 
         self.unet = UNet(config.module_config['unet'])
-        
+
         self.sigmas = UniformDistribution()
         self.v_diffusion = VDiffusion(self.unet, self.sigmas)
         self.v_sampler = VSampler(self.unet)
@@ -29,6 +30,8 @@ class LatentMusicDiffusionModel(pl.LightningModule):
             use_activation=False,
             verbose=False
         )
+
+        self.clap_metric = ClapMetric()
 
     def configure_optimizers(self):
         optimizer = torch.optim.AdamW(
@@ -53,12 +56,13 @@ class LatentMusicDiffusionModel(pl.LightningModule):
                 true_latent,
                 video_embedding):
         true_latent = true_latent.half().to(self.device)
-        video_embedding = video_embedding.to(self.device) if video_embedding != None else None
-        return self.v_diffusion(true_latent, 
-                          video_embedding)
+        video_embedding = video_embedding.to(
+            self.device) if video_embedding != None else None
+        return self.v_diffusion(true_latent,
+                                video_embedding)
 
     def training_step(self, batch, batch_idx):
-        latent_paths, video_embedding_paths = batch
+        audio_file_names, latent_paths, video_embedding_paths = batch
 
         batch_size = len(latent_paths)
 
@@ -85,7 +89,7 @@ class LatentMusicDiffusionModel(pl.LightningModule):
         return loss
 
     def validation_step(self, batch, batch_idx):
-        latent_paths, video_embedding_paths = batch
+        audio_file_names, latent_paths, video_embedding_paths = batch
 
         batch_size = len(latent_paths)
 
@@ -129,7 +133,7 @@ class LatentMusicDiffusionModel(pl.LightningModule):
                 val_dataloader = self.val_dataloader()
                 sample_batch = next(iter(val_dataloader))
 
-                latent_paths, video_embedding_paths = sample_batch
+                audio_file_names, latent_paths, video_embedding_paths = sample_batch
 
                 loaded_latents = []
                 for latent_path in latent_paths:
@@ -148,18 +152,21 @@ class LatentMusicDiffusionModel(pl.LightningModule):
                 ground_truth_wav = self.v_sampler.latents_to_wave(latents)
 
                 for i, latent_path in enumerate(latent_paths):
-                    filename = os.path.splitext(os.path.basename(latent_path))[0].rsplit('_latent', 1)[0]
+                    filename = audio_file_names[i]
                     out_dir = "./ground_truth"
-                    os.makedirs(out_dir, exist_ok=True)  # Create the directory if it doesn't exist
+                    # Create the directory if it doesn't exist
+                    os.makedirs(out_dir, exist_ok=True)
                     out = f"{out_dir}/{filename}.wav"
                     sf.write(out, ground_truth_wav[i], samplerate=16000)
 
-                wav = self.v_sampler.generate_latents(video_embeddings, self.device)
+                wav = self.v_sampler.generate_latents(
+                    video_embeddings, self.device)
 
                 for i, video_emb_path in enumerate(video_embedding_paths):
-                    filename = os.path.splitext(os.path.basename(video_emb_path))[0].rsplit('_embedding', 1)[0]
+                    filename = audio_file_names[i]
                     out_dir = f"./tmp/epoch_{self.current_epoch}"
-                    os.makedirs(out_dir, exist_ok=True)  # Create the directory if it doesn't exist
+                    # Create the directory if it doesn't exist
+                    os.makedirs(out_dir, exist_ok=True)
                     out = f"{out_dir}/{filename}.wav"
                     sf.write(out, wav[i], samplerate=16000)
 
@@ -168,8 +175,15 @@ class LatentMusicDiffusionModel(pl.LightningModule):
                     eval_dir=f"./tmp/epoch_{self.current_epoch}/"
                 )
 
+                clap_sim_score = self.clap_metric.get_similarity(
+                    './ground_truth/', f"./tmp/epoch_{self.current_epoch}/"
+                )
+
                 self.log('fad', fad_score)
+                self.log('clap_sim_score', clap_sim_score)
+                
                 print(f"Fad Score: {fad_score}")
+                print(f"Clap Sim Score: {clap_sim_score}")
 
     def fad(self, background_dir: str, eval_dir: str) -> float:
         fad_score = self.frechet.score(
@@ -178,4 +192,3 @@ class LatentMusicDiffusionModel(pl.LightningModule):
         )
 
         return fad_score
-        
