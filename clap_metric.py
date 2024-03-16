@@ -42,5 +42,5 @@ class ClapMetric:
             )
             cosine_similarities.append(cosine_similarity.item())
         
-        average_similarity = torch.mean(torch.stack(cosine_similarities))
+        average_similarity = torch.mean(torch.Tensor(cosine_similarities))
         return average_similarity.item()

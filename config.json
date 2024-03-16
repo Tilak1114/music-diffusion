@@ -1,0 +1,111 @@
+[
+    {
+        "name": "base_video_aggregate",
+        "description": "Uses an aggregate of clip embeddings of 30s video clips to condition the music generation model",
+        "use_text_conditioning": false,
+        "data_config": {
+            "csv_path": "/data/tilak/scripts/master_data/master_data.csv",
+            "latent_path": "/data/tilak/scripts/master_data/data/latents",
+            "video_embedding_path":"/data/tilak/scripts/master_data/data/video_embeddings"
+        },
+        "pretrained_configs": {
+            "text_encoder": "google/flan-t5-large",
+            "audio_ldm": "audioldm-s-full"
+        },
+        "module_config": {
+            "learning_rate": 4.5e-5,
+            "weight_decay": 1e-8,
+            "gradient_accumulation_steps": 4,
+            "lr_scheduler": "linear",
+            "adam_beta1": 0.9,
+            "adam_beta2": 0.999,
+            "adam_weight_decay": 1e-2,
+            "adam_eps": 1e-08,
+            "unet": {
+                "in_channels": 8,
+                "block_out_channels": [
+                    320,
+                    640,
+                    1280,
+                    1280
+                ],
+                "down_block_types": [
+                    "CrossAttnDownBlock2DMusic",
+                    "CrossAttnDownBlock2DMusic",
+                    "CrossAttnDownBlock2DMusic",
+                    "DownBlock2D"
+                ],
+                "attention_head_dim": [
+                    4,
+                    8,
+                    16,
+                    16
+                ],
+                "up_block_types": [
+                    "UpBlock2D",
+                    "CrossAttnUpBlock2DMusic",
+                    "CrossAttnUpBlock2DMusic",
+                    "CrossAttnUpBlock2DMusic"
+                ]
+            }
+        },
+        "trainer_config": {
+            "batch_size":16,
+            "max_epochs": 100,
+            "devices": -1
+        }
+    },
+    {
+        "name": "base_video_aggregate_with_text",
+        "decription": "Uses an aggregate of clip embeddings of 30s video clips to condition the music generation model",
+        "use_text_conditioning": true,
+        "data_config": {
+            "train_file_path": "/data/tilak/projects/mustango/data/MusicBench_train.json",
+        },
+        "pretrained_configs": {
+            "text_encoder": "google/flan-t5-large",
+            "audio_ldm": "audioldm-s-full"
+        },
+        "module_config": {
+            "learning_rate": 4.5e-5,
+            "weight_decay": 1e-8,
+            "gradient_accumulation_steps": 4,
+            "lr_scheduler": "linear",
+            "adam_beta1": 0.9,
+            "adam_beta2": 0.999,
+            "adam_weight_decay": 1e-2,
+            "adam_eps": 1e-08,
+            "unet": {
+                "in_channels": 8,
+                "block_out_channels": [
+                    320,
+                    640,
+                    1280,
+                    1280
+                ],
+                "down_block_types": [
+                    "CrossAttnDownBlock2DMusic",
+                    "CrossAttnDownBlock2DMusic",
+                    "CrossAttnDownBlock2DMusic",
+                    "DownBlock2D"
+                ],
+                "attention_head_dim": [
+                    4,
+                    8,
+                    16,
+                    16
+                ],
+                "up_block_types": [
+                    "UpBlock2D",
+                    "CrossAttnUpBlock2DMusic",
+                    "CrossAttnUpBlock2DMusic",
+                    "CrossAttnUpBlock2DMusic"
+                ]
+            }
+        },
+        "trainer_config": {
+            "max_epochs": 100,
+            "devices": -1
+        }
+    }
+]
