@@ -13,7 +13,7 @@ class LatentMusicDiffusionModel(pl.LightningModule):
         super().__init__()
         self.config = config
 
-        self.unet = UNet(config.module_config['unet'])
+        self.unet = UNet(config['module_config']['unet'])
 
         self.sigmas = UniformDistribution()
         self.v_diffusion = VDiffusion(self.unet, self.sigmas)
@@ -31,12 +31,12 @@ class LatentMusicDiffusionModel(pl.LightningModule):
     def configure_optimizers(self):
         optimizer = torch.optim.AdamW(
             self.parameters(),
-            lr=self.config.module_config['learning_rate'],
+            lr=self.config['module_config']['learning_rate'],
             betas=(
-                self.config.module_config['adam_beta1'],
-                self.config.module_config['adam_beta2']),
-            weight_decay=self.config.module_config['weight_decay'],
-            eps=self.config.module_config['adam_eps']
+                self.config['module_config']['adam_beta1'],
+                self.config['module_config']['adam_beta2']),
+            weight_decay=self.config['module_config']['weight_decay'],
+            eps=self.config['module_config']['adam_eps']
         )
         # lr_scheduler = get_scheduler(
         #     name='linear',

@@ -57,10 +57,9 @@
     },
     {
         "name": "base_video_aggregate_with_text",
-        "decription": "Uses an aggregate of clip embeddings of 30s video clips to condition the music generation model",
+        "decription": "Uses an aggregate of clip embeddings of 30s video clips along with text embeddings to condition the music generation model",
         "use_text_conditioning": true,
         "data_config": {
-            "train_file_path": "/data/tilak/projects/mustango/data/MusicBench_train.json",
         },
         "pretrained_configs": {
             "text_encoder": "google/flan-t5-large",
