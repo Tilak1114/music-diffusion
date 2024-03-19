@@ -33,7 +33,7 @@ class VDiffusion(nn.Module):
     def __init__(
         self,
         net: nn.Module,
-        sigma_distribution: UniformDistribution
+        sigma_distribution: UniformDistribution,
     ):
         super().__init__()
         self.net = net
@@ -44,7 +44,9 @@ class VDiffusion(nn.Module):
         alpha, beta = torch.cos(angle), torch.sin(angle)
         return alpha, beta
 
-    def forward(self, x: Tensor, video_embedding: Tensor) -> Tensor:
+    def forward(self, x: Tensor, 
+                video_embedding: Tensor, 
+                prompt_embedding: Tensor = None) -> Tensor:
         batch_size, device = x.shape[0], x.device
         # Sample amount of noise to add for each batch element
         sigmas = self.sigma_distribution(
@@ -66,7 +68,8 @@ class VDiffusion(nn.Module):
         # Predict velocity and return loss
         v_pred = self.net(x_noisy,
                           sigmas,
-                          video_embedding)
+                          video_embedding,
+                          prompt_embedding)
 
         loss = F.mse_loss(v_pred, v_target)
         return loss
@@ -90,6 +93,7 @@ class VSampler:
 
     def generate_latents(
             self, vid_emb,
+            prompt_emb,
             device,
             cfg_scale = 3.0,
             num_steps: int = 100,
@@ -98,6 +102,7 @@ class VSampler:
         noise_shape = (len(vid_emb), 8, 256, 16)
         x_noisy = torch.randn(noise_shape).to(device)
         vid_emb = vid_emb.to(device)
+        prompt_emb = prompt_emb.to(device)
 
         with torch.no_grad():
             b = x_noisy.shape[0]
@@ -106,20 +111,16 @@ class VSampler:
             sigmas = repeat(sigmas, "i -> i b", b=b)
             sigmas_batch = extend_dim(sigmas, dim=x_noisy.ndim + 1)
             alphas, betas = self.get_alpha_beta(sigmas_batch)
-            progress_bar = tqdm(range(num_steps),
-                                disable=not show_progress)
 
-            for i in progress_bar:
-                v_pred = self.net(x_noisy, sigmas[i], vid_emb)
+            for i in range(num_steps):
+                v_pred = self.net(x_noisy, sigmas[i], vid_emb, prompt_emb)
                 if cfg_scale > 0:
-                    v_pred_uncoditional = self.net(x_noisy, sigmas[i], None)
+                    v_pred_uncoditional = self.net(x_noisy, sigmas[i], None, None)
                     v_pred = torch.lerp(v_pred_uncoditional, v_pred, cfg_scale)
                     
                 x_pred = alphas[i] * x_noisy - betas[i] * v_pred
                 noise_pred = betas[i] * x_noisy + alphas[i] * v_pred
                 x_noisy = alphas[i + 1] * x_pred + betas[i + 1] * noise_pred
-                progress_bar.set_description(
-                    f"Sampling (noise={sigmas[i+1, 0]:.2f})")
 
         return self.latents_to_wave(x_noisy)
 

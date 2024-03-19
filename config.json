@@ -2,7 +2,6 @@
     {
         "name": "base_video_aggregate",
         "description": "Uses an aggregate of clip embeddings of 30s video clips to condition the music generation model",
-        "use_text_conditioning": false,
         "data_config": {
             "csv_path": "/data/tilak/scripts/master_data/master_data.csv",
             "latent_path": "/data/tilak/scripts/master_data/data/latents",
@@ -22,6 +21,7 @@
             "adam_weight_decay": 1e-2,
             "adam_eps": 1e-08,
             "unet": {
+                "use_text_conditioning": false,
                 "in_channels": 8,
                 "block_out_channels": [
                     320,
@@ -52,14 +52,17 @@
         "trainer_config": {
             "batch_size":16,
             "max_epochs": 100,
-            "devices": -1
+            "devices": [3]
         }
     },
     {
         "name": "base_video_aggregate_with_text",
-        "decription": "Uses an aggregate of clip embeddings of 30s video clips along with text embeddings to condition the music generation model",
-        "use_text_conditioning": true,
+        "description": "Uses an aggregate of clip embeddings of 30s video clips along with text embeddings to condition the music generation model",
         "data_config": {
+            "csv_path": "/data/tilak/scripts/master_data/master_data.csv",
+            "latent_path": "/data/tilak/scripts/master_data/data/latents",
+            "video_embedding_path":"/data/tilak/scripts/master_data/data/video_embeddings",
+            "prompt_embedding_path":"/data/tilak/scripts/master_data/data/text_embeddings"
         },
         "pretrained_configs": {
             "text_encoder": "google/flan-t5-large",
@@ -75,6 +78,7 @@
             "adam_weight_decay": 1e-2,
             "adam_eps": 1e-08,
             "unet": {
+                "use_text_conditioning": true,
                 "in_channels": 8,
                 "block_out_channels": [
                     320,
@@ -103,8 +107,9 @@
             }
         },
         "trainer_config": {
+            "batch_size":8,
             "max_epochs": 100,
-            "devices": -1
+            "devices":-1
         }
     }
 ]

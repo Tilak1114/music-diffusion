@@ -1,7 +1,6 @@
 import torch
 import torch.nn as nn
 from unet.embeddings import TimeStepEmbedding
-from typing import Any, Dict, List, Optional, Tuple, Union
 from unet.components import (
     get_down_block,
     UNetMidBlock2DCrossAttnMusic,
@@ -15,6 +14,8 @@ class UNet(nn.Module):
         block_out_channels = config['block_out_channels']
         down_block_types = config['down_block_types']
         up_block_types = config['up_block_types']
+
+        use_prompt_embedding = config['use_text_conditioning']
 
         self.in_channels = config['in_channels']
         self.pre_encoder_conv = nn.Conv2d(
@@ -30,6 +31,7 @@ class UNet(nn.Module):
         self.up_blocks = nn.ModuleList()
 
         cross_attention_dim = [512] * len(down_block_types)
+        prompt_cross_attention_dim = [1024] * len(down_block_types)
         attention_head_dim = config['attention_head_dim']
 
         output_channel = block_out_channels[0]
@@ -48,8 +50,10 @@ class UNet(nn.Module):
                 resnet_eps=1e-05,
                 resnet_groups=32,
                 cross_attention_dim=cross_attention_dim[i],
+                prompt_cross_attention_dim=prompt_cross_attention_dim[i],
                 attn_num_head_channels=attention_head_dim[i],
                 downsample_padding=1,
+                use_prompt_conditioning=use_prompt_embedding
             )
             self.down_blocks.append(down_block)
 
@@ -58,13 +62,16 @@ class UNet(nn.Module):
             temb_channels=1280,
             resnet_eps=1e-05,
             cross_attention_dim=cross_attention_dim[-1],
+            prompt_cross_attention_dim=prompt_cross_attention_dim[-1],
             attn_num_head_channels=attention_head_dim[-1],
             resnet_groups=32,
+            use_prompt_conditioning=use_prompt_embedding
         )
 
         reversed_block_out_channels = list(reversed(block_out_channels))
         reversed_attention_head_dim = list(reversed(attention_head_dim))
         reversed_cross_attention_dim = list(reversed(cross_attention_dim))
+        reversed_prompt_cross_attention_dim = list(reversed(prompt_cross_attention_dim))
 
         self.num_upsamplers = 0
 
@@ -96,6 +103,8 @@ class UNet(nn.Module):
                 resnet_groups=32,
                 cross_attention_dim=reversed_cross_attention_dim[i],
                 attn_num_head_channels=reversed_attention_head_dim[i],
+                prompt_cross_attention_dim=reversed_prompt_cross_attention_dim[i],
+                use_prompt_conditioning=use_prompt_embedding
             )
             self.up_blocks.append(up_block)
             prev_output_channel = output_channel
@@ -117,7 +126,8 @@ class UNet(nn.Module):
     def forward(self,
                 latents: torch.FloatTensor,
                 timesteps,
-                vid_emb: torch.Tensor = None):
+                vid_emb: torch.Tensor = None,
+                prompt_emb = None):
 
         timestep_embedding = self.time_step_embedding(timesteps)
         latents = self.pre_encoder_conv(latents)
@@ -131,6 +141,7 @@ class UNet(nn.Module):
                     hidden_states=latents,
                     temb=timestep_embedding,
                     vid_emb=vid_emb,
+                    prompt_emb=prompt_emb
                 )
             else:
                 latents, res_samples = downsample_block(

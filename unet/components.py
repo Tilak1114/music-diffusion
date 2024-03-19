@@ -15,7 +15,9 @@ def get_down_block(
     attn_num_head_channels,
     resnet_groups=None,
     cross_attention_dim=None,
+    prompt_cross_attention_dim=None,
     downsample_padding=None,
+    use_prompt_conditioning = False
 ):
     down_block_type = down_block_type[7:] if down_block_type.startswith(
         "UNetRes") else down_block_type
@@ -34,9 +36,9 @@ def get_down_block(
     elif down_block_type == "CrossAttnDownBlock2DMusic":
         if cross_attention_dim is None:
             raise ValueError(
-                "cross_attention_dim must be specified for CrossAttnDownBlock2D")
+                "cross_attention_dim must be specified for CrossAttnDownBlock2D"
+                )
         
-        # TODO:Cross attn dim is intentionally NONE. Later change this to accomodate video embeddings
         return CrossAttnDownBlock2DMusic(
             num_layers=num_layers,
             in_channels=in_channels,
@@ -46,8 +48,10 @@ def get_down_block(
             resnet_eps=resnet_eps,
             resnet_groups=resnet_groups,
             downsample_padding=downsample_padding,
-            cross_attention_dim=None,
+            cross_attention_dim=cross_attention_dim,
+            prompt_cross_attention_dim=prompt_cross_attention_dim,
             attn_num_head_channels=attn_num_head_channels,
+            use_prompt_conditioning=use_prompt_conditioning
         )
 
     raise ValueError(f"{down_block_type} does not exist.")
@@ -65,6 +69,8 @@ def get_up_block(
     attn_num_head_channels,
     resnet_groups=None,
     cross_attention_dim=None,
+    prompt_cross_attention_dim=None,
+    use_prompt_conditioning = False
 ):
     up_block_type = up_block_type[7:] if up_block_type.startswith(
         "UNetRes") else up_block_type
@@ -84,7 +90,7 @@ def get_up_block(
         if cross_attention_dim is None:
             raise ValueError(
                 "cross_attention_dim must be specified for CrossAttnUpBlock2D")
-        # TODO:Cross attn dim is intentionally NONE. Later change this to accomodate video embeddings
+        
         return CrossAttnUpBlock2DMusic(
             num_layers=num_layers,
             in_channels=in_channels,
@@ -94,8 +100,10 @@ def get_up_block(
             add_upsample=add_upsample,
             resnet_eps=resnet_eps,
             resnet_groups=resnet_groups,
-            cross_attention_dim=None,
+            cross_attention_dim=cross_attention_dim,
             attn_num_head_channels=attn_num_head_channels,
+            prompt_cross_attention_dim=prompt_cross_attention_dim,
+            use_prompt_conditioning=use_prompt_conditioning
         )
 
     raise ValueError(f"{up_block_type} does not exist.")
@@ -169,11 +177,15 @@ class UNetMidBlock2DCrossAttnMusic(nn.Module):
         resnet_groups: int = 32,
         attn_num_head_channels=1,
         cross_attention_dim=1280,
+        prompt_cross_attention_dim = 1024,
+        use_prompt_conditioning = False
     ):
         super().__init__()
 
         self.has_cross_attention = True
         self.attn_num_head_channels = attn_num_head_channels
+        self.use_prompt_conditioning = use_prompt_conditioning
+
         resnet_groups = resnet_groups if resnet_groups is not None else min(
             in_channels // 4, 32)
 
@@ -189,6 +201,7 @@ class UNetMidBlock2DCrossAttnMusic(nn.Module):
             )
         ]
         attentions = []
+        attentions2 = []
        
         for _ in range(num_layers):
             attentions.append(
@@ -201,6 +214,16 @@ class UNetMidBlock2DCrossAttnMusic(nn.Module):
                         norm_num_groups=resnet_groups,
                     )
                 )
+            attentions2.append(
+                Transformer2DModel(
+                        attn_num_head_channels,
+                        in_channels // attn_num_head_channels,
+                        in_channels=in_channels,
+                        num_layers=1,
+                        cross_attention_dim=prompt_cross_attention_dim,
+                        norm_num_groups=resnet_groups,
+                    )
+            )
             resnets.append(
                 ResnetBlock2D(
                     in_channels=in_channels,
@@ -213,6 +236,10 @@ class UNetMidBlock2DCrossAttnMusic(nn.Module):
             )
 
         self.attentions = nn.ModuleList(attentions)
+        
+        if use_prompt_conditioning:
+            self.attentions2 = nn.ModuleList(attentions2)
+
         self.resnets = nn.ModuleList(resnets)
 
     def forward(
@@ -220,14 +247,21 @@ class UNetMidBlock2DCrossAttnMusic(nn.Module):
         hidden_states: torch.FloatTensor,
         temb: Optional[torch.FloatTensor] = None,
         vid_emb: Optional[torch.FloatTensor] = None,
+        prompt_emb = None
     ) -> torch.FloatTensor:
         hidden_states = self.resnets[0](hidden_states, temb)
-        for attn, resnet in zip(self.attentions, self.resnets[1:]):
+        for attn, attn2, resnet in zip(self.attentions, self.attentions2, self.resnets[1:]):
             
             hidden_states = attn(
                 hidden_states,
                 encoder_hidden_states=vid_emb,
             )
+
+            if self.use_prompt_conditioning:
+                hidden_states = attn2(
+                    hidden_states,
+                    encoder_hidden_states=prompt_emb,
+                )
 
             hidden_states = resnet(hidden_states, temb)
 
@@ -317,15 +351,20 @@ class CrossAttnDownBlock2DMusic(nn.Module):
         resnet_groups: int = 32,
         attn_num_head_channels=1,
         cross_attention_dim=512,
+        prompt_cross_attention_dim=1024,
         downsample_padding=1,
         add_downsample=True,
+        use_prompt_conditioning = False
     ):
         super().__init__()
         resnets = []
         attentions = []
+        attentions2 = []
 
         self.has_cross_attention = True
         self.attn_num_head_channels = attn_num_head_channels
+
+        self.use_prompt_conditioning = use_prompt_conditioning
 
         for i in range(num_layers):
             in_channels = in_channels if i == 0 else out_channels
@@ -351,8 +390,23 @@ class CrossAttnDownBlock2DMusic(nn.Module):
                 )
             )
 
+            attentions2.append(
+                Transformer2DModel(
+                    attn_num_head_channels,
+                    out_channels // attn_num_head_channels,
+                    in_channels=out_channels,
+                    num_layers=1,
+                    cross_attention_dim=prompt_cross_attention_dim,
+                    norm_num_groups=resnet_groups,
+                )
+            )
+
 
         self.attentions = nn.ModuleList(attentions)
+        
+        if use_prompt_conditioning:
+            self.attentions2 = nn.ModuleList(attentions2)
+
         self.resnets = nn.ModuleList(resnets)
 
         if add_downsample:
@@ -375,14 +429,20 @@ class CrossAttnDownBlock2DMusic(nn.Module):
         hidden_states: torch.FloatTensor,
         temb: Optional[torch.FloatTensor] = None,
         vid_emb: Optional[torch.FloatTensor] = None,
+        prompt_emb = None
     ):
         output_states = ()
 
-        for resnet, attn in zip(self.resnets, self.attentions):
+        for resnet, attn, attn2 in zip(self.resnets, self.attentions, self.attentions2):
             hidden_states = resnet(hidden_states, temb)
             hidden_states = attn(
                 hidden_states,
                 encoder_hidden_states=vid_emb,
+            )
+
+            hidden_states = attn2(
+                hidden_states,
+                encoder_hidden_states=prompt_emb,
             )
 
             output_states += (hidden_states,)
@@ -587,13 +647,17 @@ class CrossAttnUpBlock2DMusic(nn.Module):
         attn_num_head_channels=1,
         cross_attention_dim=512,
         add_upsample=True,
+        prompt_cross_attention_dim = 1024,
+        use_prompt_conditioning = False
     ):
         super().__init__()
         resnets = []
         attentions = []
+        attentions2 = []
 
         self.has_cross_attention = True
         self.attn_num_head_channels = attn_num_head_channels
+        self.use_prompt_conditioning = use_prompt_conditioning
 
         for i in range(num_layers):
             res_skip_channels = in_channels if (
@@ -622,7 +686,22 @@ class CrossAttnUpBlock2DMusic(nn.Module):
                 )
             )
 
+            attentions2.append(
+                Transformer2DModel(
+                    attn_num_head_channels,
+                    out_channels // attn_num_head_channels,
+                    in_channels=out_channels,
+                    num_layers=1,
+                    cross_attention_dim=prompt_cross_attention_dim,
+                    norm_num_groups=resnet_groups,
+                )
+            )
+
         self.attentions = nn.ModuleList(attentions)
+
+        if use_prompt_conditioning:
+            self.attentions2 = nn.ModuleList(attentions2)
+
         self.resnets = nn.ModuleList(resnets)
 
         if add_upsample:
@@ -637,9 +716,11 @@ class CrossAttnUpBlock2DMusic(nn.Module):
         res_hidden_states_tuple: Tuple[torch.FloatTensor, ...],
         temb: Optional[torch.FloatTensor] = None,
         vid_emb: Optional[torch.FloatTensor] = None,
+        prompt_emb = None,
         upsample_size: Optional[int] = None,
+
     ):
-        for resnet, attn in zip(self.resnets, self.attentions):
+        for resnet, attn, attn2 in zip(self.resnets, self.attentions, self.attentions2):
             # pop res hidden states
             res_hidden_states = res_hidden_states_tuple[-1]
             res_hidden_states_tuple = res_hidden_states_tuple[:-1]
@@ -651,6 +732,12 @@ class CrossAttnUpBlock2DMusic(nn.Module):
                 hidden_states,
                 encoder_hidden_states=vid_emb,
             )
+
+            if self.use_prompt_conditioning:
+                hidden_states = attn2(
+                    hidden_states,
+                    encoder_hidden_states=prompt_emb,
+                )
 
         if self.upsamplers is not None:
             for upsampler in self.upsamplers:
