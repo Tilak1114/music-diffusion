@@ -1,0 +1,1 @@
+{"csv_path": "/data/tilak/scripts/master_data/master_data.csv", "latent_path": "/data/tilak/scripts/master_data/data/latents", "video_embedding_path": "/data/tilak/scripts/master_data/data/video_embeddings", "prompt_embedding_path": "/data/tilak/scripts/master_data/data/text_embeddings"}

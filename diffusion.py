@@ -96,8 +96,7 @@ class VSampler:
             prompt_emb,
             device,
             cfg_scale = 3.0,
-            num_steps: int = 100,
-            show_progress: bool = False):
+            num_steps: int = 100,):
 
         noise_shape = (len(vid_emb), 8, 256, 16)
         x_noisy = torch.randn(noise_shape).to(device)

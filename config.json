@@ -109,7 +109,7 @@
         "trainer_config": {
             "batch_size":8,
             "max_epochs": 100,
-            "devices":-1
+            "devices":[1, 2, 3]
         }
     }
 ]
