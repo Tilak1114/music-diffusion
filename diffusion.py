@@ -1,13 +1,12 @@
 from math import pi
-from typing import Any, Tuple
+from typing import Tuple
 
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
-from einops import rearrange, repeat
+from einops import repeat
 from torch import Tensor
 from model_utils import build_pretrained_models
-from tqdm import tqdm
 
 
 class UniformDistribution:
@@ -92,16 +91,22 @@ class VSampler:
         return alpha, beta
 
     def generate_latents(
-            self, vid_emb,
-            prompt_emb,
+            self, 
+            vid_embs,
+            prompt_embs,
             device,
             cfg_scale = 3.0,
             num_steps: int = 100,):
+        
+        if vid_embs == None and prompt_embs == None:
+            num_samples = 1
+        else:
+            num_samples = vid_embs.shape[0] if vid_embs != None else prompt_embs.shape[0]
 
-        noise_shape = (len(vid_emb), 8, 256, 16)
+        noise_shape = (num_samples, 8, 256, 16)
         x_noisy = torch.randn(noise_shape).to(device)
-        vid_emb = vid_emb.to(device)
-        prompt_emb = prompt_emb.to(device)
+        vid_embs = vid_embs.to(device) if vid_embs != None else None
+        prompt_embs = prompt_embs.to(device) if prompt_embs != None else None
 
         with torch.no_grad():
             b = x_noisy.shape[0]
@@ -112,7 +117,7 @@ class VSampler:
             alphas, betas = self.get_alpha_beta(sigmas_batch)
 
             for i in range(num_steps):
-                v_pred = self.net(x_noisy, sigmas[i], vid_emb, prompt_emb)
+                v_pred = self.net(x_noisy, sigmas[i], vid_embs, prompt_embs)
                 if cfg_scale > 0:
                     v_pred_uncoditional = self.net(x_noisy, sigmas[i], None, None)
                     v_pred = torch.lerp(v_pred_uncoditional, v_pred, cfg_scale)

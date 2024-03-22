@@ -12,7 +12,7 @@
             "audio_ldm": "audioldm-s-full"
         },
         "module_config": {
-            "learning_rate": 4.5e-5,
+            "learning_rate": 5e-4,
             "weight_decay": 1e-8,
             "gradient_accumulation_steps": 4,
             "lr_scheduler": "linear",
@@ -109,7 +109,7 @@
         "trainer_config": {
             "batch_size":8,
             "max_epochs": 100,
-            "devices":[1, 2, 3]
+            "devices":-1
         }
     }
 ]

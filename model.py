@@ -8,7 +8,6 @@ from clap_metric import ClapMetric
 from frechet_audio_distance import FrechetAudioDistance
 from diffusion import UniformDistribution, VDiffusion, VSampler
 import tempfile
-from tqdm import tqdm
 import shutil
 import json
 
@@ -44,14 +43,24 @@ class LatentMusicDiffusionModel(pl.LightningModule):
             weight_decay=self.config['module_config']['weight_decay'],
             eps=self.config['module_config']['adam_eps']
         )
-        # lr_scheduler = get_scheduler(
-        #     name='linear',
-        #     optimizer=optimizer,
-        #     num_warmup_steps=0,
-        #     num_training_steps=35000
-        # )
-
-        return optimizer
+        
+        total_epochs = self.config['trainer_config']['max_epochs']
+        min_lr = self.config['module_config']['learning_rate'] * 0.01
+        
+        warmup_epochs = 5
+        
+        def lr_lambda(epoch):
+            if epoch < warmup_epochs:
+                return 1.0
+            else:
+                return max(
+                    (1 - (epoch - warmup_epochs) / (total_epochs - warmup_epochs)),
+                    min_lr / self.config['module_config']['learning_rate']
+                )
+        
+        scheduler = torch.optim.lr_scheduler.LambdaLR(optimizer, lr_lambda)
+        
+        return [optimizer], [scheduler]
 
     def forward(self,
                 true_latent,
@@ -80,7 +89,8 @@ class LatentMusicDiffusionModel(pl.LightningModule):
             config = self.config
 
             self.mlflow_run = mlflow.start_run(
-                run_name=self.config['name'], description=self.config['description'])
+                run_name=self.config['name'], description=self.config['description']
+                )
 
             mlflow.log_param("name", config["name"])
             mlflow.log_param("description", config["description"])
@@ -241,26 +251,37 @@ class LatentMusicDiffusionModel(pl.LightningModule):
                 ground_truth_dir = tempfile.mkdtemp()
                 generated_output_dir = tempfile.mkdtemp()
 
+                video_embs = []
+                prompt_embs = []
+                generated_wavs = []
+
                 for i, latent_path in enumerate(latent_paths):
                     latent = torch.load(latent_path).squeeze(0)
                     video_emb = torch.load(video_embedding_paths[i])
                     prompt_emb = torch.load(prompt_embedding_paths[i])
 
+                    video_embs.append(video_emb)
+                    prompt_embs.append(prompt_emb)
+
                     ground_truth_wav = self.v_sampler.latents_to_wave(
-                        latent.unsqueeze(0))
-                    generated_wav = self.v_sampler.generate_latents(
-                        video_emb.unsqueeze(0),
-                        prompt_emb.unsqueeze(0),
-                        self.device
+                        latent.unsqueeze(0)
                     )
 
                     sf.write(os.path.join(ground_truth_dir, f"{audio_file_names[i]}.wav"),
                              ground_truth_wav.squeeze(), samplerate=16000)
-                    sf.write(os.path.join(generated_output_dir, f"{audio_file_names[i]}.wav"),
-                             generated_wav.squeeze(), samplerate=16000)
 
-                    # Causes a bottleneck in distributed training. Hence only generating one sample
-                    break
+                video_embs = torch.stack(video_embs)
+                prompt_embs = torch.stack(prompt_embs)
+
+                generated_wavs = self.v_sampler.generate_latents(
+                    video_embs,
+                    prompt_embs,
+                    self.device
+                )
+
+                for gen_wav, audio_file_name in zip(generated_wavs, audio_file_names):
+                    sf.write(os.path.join(generated_output_dir, f"{audio_file_name}.wav"),
+                             gen_wav.squeeze(), samplerate=16000)
 
                 fad_score = self.fad(
                     background_dir=ground_truth_dir, eval_dir=generated_output_dir)
@@ -286,53 +307,16 @@ class LatentMusicDiffusionModel(pl.LightningModule):
 
     def generate_music(self, prompt_emb, video_emb, output_path):
         generated_wav = self.v_sampler.generate_latents(
-            video_emb.unsqueeze(0),
-            prompt_emb.unsqueeze(0),
+            video_emb,
+            prompt_emb,
             self.device
         )
 
         output_path = os.path.join(output_path, f"output.wav")
 
         sf.write(output_path, generated_wav.squeeze(), samplerate=16000)
-        
+
         return output_path
-
-    def inference(self, batch, ground_truth_dir, generated_output_dir, device):
-        audio_file_names, latent_paths, video_embedding_paths, prompt_embedding_paths = batch
-
-        if os.path.exists(ground_truth_dir):
-            shutil.rmtree(ground_truth_dir)
-        os.makedirs(ground_truth_dir)
-
-        if os.path.exists(generated_output_dir):
-            shutil.rmtree(generated_output_dir)
-        os.makedirs(generated_output_dir)
-
-        for i, latent_path in enumerate(tqdm(latent_paths, desc="Inference")):
-            latent = torch.load(latent_path).squeeze(0)
-            video_emb = torch.load(video_embedding_paths[i])
-            prompt_emb = torch.load(prompt_embedding_paths[i])
-
-            ground_truth_wav = self.v_sampler.latents_to_wave(
-                latent.unsqueeze(0))
-            generated_wav = self.v_sampler.generate_latents(
-                video_emb.unsqueeze(0),
-                prompt_emb.unsqueeze(0),
-                device
-            )
-
-            sf.write(os.path.join(ground_truth_dir, f"{audio_file_names[i]}.wav"),
-                     ground_truth_wav.squeeze(), samplerate=16000)
-            sf.write(os.path.join(generated_output_dir, f"{audio_file_names[i]}.wav"),
-                     generated_wav.squeeze(), samplerate=16000)
-
-        fad_score = self.fad(
-            background_dir=ground_truth_dir, eval_dir=generated_output_dir)
-        clap_sim_score = self.clap_metric.get_similarity(
-            ground_truth_dir=ground_truth_dir, generated_dir=generated_output_dir)
-
-        print(f"Fad Score: {fad_score}")
-        print(f"Clap Sim Score: {clap_sim_score}")
 
     def download_mlflow_artifacts(self, run_id, artifact_path, dest_path):
         client = mlflow.tracking.MlflowClient()

@@ -1,1 +1,0 @@
-Uses an aggregate of clip embeddings of 30s video clips along with text embeddings to condition the music generation model
