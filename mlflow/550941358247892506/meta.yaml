@@ -1,0 +1,6 @@
+artifact_location: file:///data/tilak/projects/music-diffusion/mlflow/550941358247892506
+creation_time: 1711084406341
+experiment_id: '550941358247892506'
+last_update_time: 1711084406341
+lifecycle_stage: active
+name: base_video_aggregate_with_text

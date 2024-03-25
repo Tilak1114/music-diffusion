@@ -23,7 +23,7 @@ if __name__ == "__main__":
     device = "cuda:0"
 
     model = LatentMusicDiffusionModel.load_from_checkpoint(
-        "/data/tilak/projects/music-diffusion/checkpoints/epoch=46.ckpt",
+        "/data/tilak/projects/music-diffusion/checkpoints/epoch=45.ckpt",
         config=config
         ).to(device)
     
