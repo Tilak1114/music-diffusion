@@ -75,6 +75,47 @@ class LatentMusicDiffusionModel(pl.LightningModule):
         return self.v_diffusion(true_latent,
                                 video_embedding,
                                 prompt_embedding)
+    
+    def predict(self, dataloader, output_dir):
+        os.makedirs(output_dir, exist_ok=True)
+
+        generated_dir = os.path.join(output_dir, "generated")
+        ground_truth_dir = os.path.join(output_dir, "ground_truth")
+        
+        os.makedirs(generated_dir, exist_ok=True)
+        os.makedirs(ground_truth_dir, exist_ok=True)
+        
+        for batch_idx, batch in enumerate(dataloader):
+            audio_file_names, latent_paths, video_embedding_paths, prompt_embedding_paths = batch
+
+            # Load video embeddings
+            video_embs = [torch.load(path) for path in video_embedding_paths]
+            video_embs = torch.stack(video_embs) if video_embs else None
+
+            # Load prompt embeddings
+            prompt_embs = [torch.load(path) for path in prompt_embedding_paths]
+            prompt_embs = torch.stack(prompt_embs) if prompt_embs else None
+
+            # Load true latents and convert them to waveforms (ground truth audio)
+            true_latents = [torch.load(path).squeeze(0) for path in latent_paths]
+            true_latents = torch.stack(true_latents).to(self.device)
+
+            ground_truth_wavs = self.v_sampler.latents_to_wave(true_latents)
+
+            # Generate new wavs from embeddings
+            generated_wavs = self.v_sampler.generate_latents(video_embs, prompt_embs, self.device)
+
+            for i, (gen_wav, gt_wav) in enumerate(zip(generated_wavs, ground_truth_wavs)):
+                base_name_no_ext = os.path.splitext(os.path.basename(audio_file_names[i]))[0]
+
+                gen_output_file_path = os.path.join(generated_dir, f"{base_name_no_ext}.wav")
+                gt_output_file_path = os.path.join(ground_truth_dir, f"{base_name_no_ext}.wav")
+
+                sf.write(gen_output_file_path, gen_wav.squeeze(), samplerate=16000)
+                print(f"Saved generated audio to {gen_output_file_path}")
+
+                sf.write(gt_output_file_path, gt_wav.squeeze(), samplerate=16000)
+                print(f"Saved ground truth audio to {gt_output_file_path}")
 
     def on_train_start(self):
         if self.trainer.global_rank == 0:

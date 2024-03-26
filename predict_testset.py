@@ -8,7 +8,7 @@ if __name__ == "__main__":
     with open(file_path, 'r') as file:
         config_list = json.load(file)
 
-        # Modify the list index for different experiments. Check config.json for details
+     # Modify the list index for different experiments. Check config.json for details
     config = config_list[1]
 
     datamodule = DataModule(
@@ -23,16 +23,12 @@ if __name__ == "__main__":
     device = "cuda:0"
 
     model = LatentMusicDiffusionModel.load_from_checkpoint(
-        "/data/tilak/projects/music-diffusion/checkpoints/epoch=45.ckpt",
+        "/data/tilak/projects/music-diffusion/checkpoints/epoch=53.ckpt",
         config=config
         ).to(device)
     
     model.eval()
 
     test_dataloader = datamodule.test_dataloader()
-    batch = next(iter(test_dataloader))
 
-    model.inference(batch=batch,
-                    ground_truth_dir="/data/tilak/projects/music-diffusion/samples/ground_truth",
-                    generated_output_dir="/data/tilak/projects/music-diffusion/samples/outputs",
-                    device=device)
+    model.predict(test_dataloader, "/data/tilak/projects/music-diffusion/samples")
