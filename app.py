@@ -28,7 +28,7 @@ class MusicDiffusionApp:
         config = config_list[model_id]
 
         checkpoints = ["/data/tilak/projects/music-diffusion/archive/epoch=165.ckpt", 
-                       "/data/tilak/projects/music-diffusion/checkpoints/epoch=45.ckpt"]
+                       "/data/tilak/projects/music-diffusion/checkpoints/epoch=53.ckpt"]
         ckpt = checkpoints[model_id]
         model = LatentMusicDiffusionModel.load_from_checkpoint(ckpt, config=config)
 
@@ -49,6 +49,8 @@ class MusicDiffusionApp:
         prompt_emb = self.get_prompt_embedding(prompt)
         video_emb = self.get_video_embedding(frames)
 
+        print(prompt_emb.shape, video_emb.shape)
+
         model = self.load_model(1)
         generated_audio_path = model.generate_music(prompt_emb, video_emb, "./outputs")
         return generated_audio_path
@@ -60,7 +62,7 @@ class MusicDiffusionApp:
             with torch.no_grad():
                 embeddings.append(self.vit.encode_image(image))
         
-        return torch.stack(embeddings).mean(dim=0)
+        return torch.stack(embeddings).mean(dim=0).unsqueeze(0)
 
 def app(musicDiffusionApp: MusicDiffusionApp):
     st.title("Harmonizing Pixels and Music")
