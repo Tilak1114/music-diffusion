@@ -1,9 +1,9 @@
 import torch
 import torch.nn as nn
-from unet.embeddings import TimeStepEmbedding
+from unet.embeddings import TimeStepEmbedding, FloatFeatureEmbedding
 from unet.components import (
     get_down_block,
-    UNetMidBlock2DCrossAttnMusic,
+    UNetMidBlock3DCrossAttnMusic,
     get_up_block
 )
 
@@ -18,20 +18,24 @@ class UNet(nn.Module):
         use_prompt_embedding = config['use_text_conditioning']
 
         self.in_channels = config['in_channels']
-        self.pre_encoder_conv = nn.Conv2d(
+        self.pre_encoder_conv = nn.Conv3d(
             in_channels=self.in_channels,
             out_channels=block_out_channels[0],
-            kernel_size=3,
+            kernel_size=(3, 3, 3),
             stride=1,
             padding=1
         )
         self.time_step_embedding = TimeStepEmbedding()
 
+        self.rbg_mean_embedding = FloatFeatureEmbedding(1, 256)
+
         self.down_blocks = nn.ModuleList()
         self.up_blocks = nn.ModuleList()
 
-        cross_attention_dim = [512] * len(down_block_types)
+        vid_cross_attention_dim = [512] * len(down_block_types)
+        tempo_cross_attention_dim = [256] * len(down_block_types)
         prompt_cross_attention_dim = [1024] * len(down_block_types)
+        
         attention_head_dim = config['attention_head_dim']
 
         output_channel = block_out_channels[0]
@@ -49,28 +53,30 @@ class UNet(nn.Module):
                 add_downsample=not is_final_block,
                 resnet_eps=1e-05,
                 resnet_groups=32,
-                cross_attention_dim=cross_attention_dim[i],
+                vid_cross_attention_dim=vid_cross_attention_dim[i],
                 prompt_cross_attention_dim=prompt_cross_attention_dim[i],
+                tempo_cross_attention_dim=tempo_cross_attention_dim[i],
                 attn_num_head_channels=attention_head_dim[i],
                 downsample_padding=1,
-                use_prompt_conditioning=use_prompt_embedding
             )
             self.down_blocks.append(down_block)
 
-        self.mid_block = UNetMidBlock2DCrossAttnMusic(
+        self.mid_block = UNetMidBlock3DCrossAttnMusic(
             in_channels=block_out_channels[-1],
             temb_channels=1280,
             resnet_eps=1e-05,
-            cross_attention_dim=cross_attention_dim[-1],
-            prompt_cross_attention_dim=prompt_cross_attention_dim[-1],
+            cross_attention_dims=[vid_cross_attention_dim[-1], 
+                                  tempo_cross_attention_dim[-1],
+                                  prompt_cross_attention_dim[-1] 
+                                  ],
             attn_num_head_channels=attention_head_dim[-1],
             resnet_groups=32,
-            use_prompt_conditioning=use_prompt_embedding
         )
 
         reversed_block_out_channels = list(reversed(block_out_channels))
         reversed_attention_head_dim = list(reversed(attention_head_dim))
-        reversed_cross_attention_dim = list(reversed(cross_attention_dim))
+        reversed_vid_cross_attention_dim = list(reversed(vid_cross_attention_dim))
+        reversed_tempo_cross_attention_dim = list(reversed(tempo_cross_attention_dim))
         reversed_prompt_cross_attention_dim = list(reversed(prompt_cross_attention_dim))
 
         self.num_upsamplers = 0
@@ -101,10 +107,10 @@ class UNet(nn.Module):
                 add_upsample=add_upsample,
                 resnet_eps=1e-05,
                 resnet_groups=32,
-                cross_attention_dim=reversed_cross_attention_dim[i],
                 attn_num_head_channels=reversed_attention_head_dim[i],
+                vid_cross_attention_dim=reversed_vid_cross_attention_dim[i],
                 prompt_cross_attention_dim=reversed_prompt_cross_attention_dim[i],
-                use_prompt_conditioning=use_prompt_embedding
+                tempo_cross_attention_dim=reversed_tempo_cross_attention_dim[i],
             )
             self.up_blocks.append(up_block)
             prev_output_channel = output_channel
@@ -116,21 +122,28 @@ class UNet(nn.Module):
         )
         self.conv_act = nn.SiLU()
 
-        conv_out_padding = (3 - 1) // 2
-        self.conv_out = nn.Conv2d(
+        self.conv_out = nn.Conv3d(
             block_out_channels[0], 8,
-            kernel_size=3,
-            padding=conv_out_padding
+            kernel_size=(3, 3, 3),
+            padding=1
         )
 
     def forward(self,
                 latents: torch.FloatTensor,
                 timesteps,
-                vid_emb: torch.Tensor = None,
-                prompt_emb = None):
+                video_emb = None,
+                rgb_mean = None,
+                prompt_emb = None,
+                ):
 
         timestep_embedding = self.time_step_embedding(timesteps)
         latents = self.pre_encoder_conv(latents)
+
+        if rgb_mean is not None:
+            rgb_mean = rgb_mean.to(timestep_embedding.device)
+            rgb_embedding = self.rbg_mean_embedding(rgb_mean)
+        else:
+            rgb_embedding = None
 
         forward_upsample_size = True
 
@@ -140,8 +153,9 @@ class UNet(nn.Module):
                 latents, res_samples = downsample_block(
                     hidden_states=latents,
                     temb=timestep_embedding,
-                    vid_emb=vid_emb,
-                    prompt_emb=prompt_emb
+                    prompt_emb=prompt_emb,
+                    vid_emb=video_emb,
+                    tempo_emb=rgb_embedding,
                 )
             else:
                 latents, res_samples = downsample_block(
@@ -152,8 +166,9 @@ class UNet(nn.Module):
             down_block_res_samples += res_samples
 
         latents = self.mid_block(
-            latents, timestep_embedding,
-            vid_emb=vid_emb)
+            latents, 
+            timestep_embedding,
+            )
 
         # UP
         for i, upsample_block in enumerate(self.up_blocks):
@@ -172,7 +187,6 @@ class UNet(nn.Module):
                     hidden_states=latents,
                     temb=timestep_embedding,
                     res_hidden_states_tuple=res_samples,
-                    vid_emb=vid_emb,
                     upsample_size=upsample_size,
                 )
             else:

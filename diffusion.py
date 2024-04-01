@@ -44,8 +44,10 @@ class VDiffusion(nn.Module):
         return alpha, beta
 
     def forward(self, x: Tensor, 
-                video_embedding: Tensor, 
-                prompt_embedding: Tensor = None) -> Tensor:
+                prompt_embedding: Tensor = None,
+                video_embedding: Tensor = None,
+                rgb_mean: Tensor = None
+                ) -> Tensor:
         batch_size, device = x.shape[0], x.device
         # Sample amount of noise to add for each batch element
         sigmas = self.sigma_distribution(
@@ -68,7 +70,9 @@ class VDiffusion(nn.Module):
         v_pred = self.net(x_noisy,
                           sigmas,
                           video_embedding,
-                          prompt_embedding)
+                          rgb_mean,
+                          prompt_embedding,
+                          )
 
         loss = F.mse_loss(v_pred, v_target)
         return loss
@@ -93,6 +97,7 @@ class VSampler:
     def generate_latents(
             self, 
             vid_embs,
+            rgb_tensor,
             prompt_embs,
             device,
             cfg_scale = 3.0,
@@ -103,9 +108,10 @@ class VSampler:
         else:
             num_samples = vid_embs.shape[0] if vid_embs != None else prompt_embs.shape[0]
 
-        noise_shape = (num_samples, 8, 256, 16)
+        noise_shape = (num_samples, 8, 3, 256, 16)
         x_noisy = torch.randn(noise_shape).to(device)
         vid_embs = vid_embs.to(device) if vid_embs != None else None
+        rgb_tensor = rgb_tensor.to(device) if rgb_tensor != None else None
         prompt_embs = prompt_embs.to(device) if prompt_embs != None else None
 
         with torch.no_grad():
@@ -117,16 +123,16 @@ class VSampler:
             alphas, betas = self.get_alpha_beta(sigmas_batch)
 
             for i in range(num_steps):
-                v_pred = self.net(x_noisy, sigmas[i], vid_embs, prompt_embs)
+                v_pred = self.net(x_noisy, sigmas[i], vid_embs, rgb_tensor, prompt_embs)
                 if cfg_scale > 0:
-                    v_pred_uncoditional = self.net(x_noisy, sigmas[i], None, None)
+                    v_pred_uncoditional = self.net(x_noisy, sigmas[i], None, None, None)
                     v_pred = torch.lerp(v_pred_uncoditional, v_pred, cfg_scale)
                     
                 x_pred = alphas[i] * x_noisy - betas[i] * v_pred
                 noise_pred = betas[i] * x_noisy + alphas[i] * v_pred
                 x_noisy = alphas[i + 1] * x_pred + betas[i + 1] * noise_pred
 
-        return self.latents_to_wave(x_noisy)
+        return x_noisy
 
     def latents_to_wave(self, latents):
         self.vae = self.vae.to(latents.device)

@@ -320,7 +320,6 @@ def get_timestep_embedding(
         emb = torch.nn.functional.pad(emb, (0, 1, 0, 0))
     return emb
 
-
 class TimeStepEmbedding(nn.Module):
     def __init__(self):
         super(TimeStepEmbedding, self).__init__()
@@ -343,3 +342,16 @@ class TimeStepEmbedding(nn.Module):
         )
 
         return x
+
+class FloatFeatureEmbedding(nn.Module):
+    def __init__(self, input_dim, output_dim):
+        super(FloatFeatureEmbedding, self).__init__()
+        self.linear1 = nn.Linear(input_dim, output_dim // 2) 
+        self.activation = nn.SiLU() 
+        self.linear2 = nn.Linear(output_dim // 2, output_dim)
+
+    def forward(self, float_features):
+        x = self.activation(self.linear1(float_features))
+        x = self.linear2(x)
+        return x
+    

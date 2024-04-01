@@ -4,6 +4,7 @@ import torch.nn.functional as F
 from typing import Any, Dict, Optional, Tuple
 from unet.attention import BasicTransformerBlock
 
+
 def get_down_block(
     down_block_type,
     num_layers,
@@ -14,15 +15,15 @@ def get_down_block(
     resnet_eps,
     attn_num_head_channels,
     resnet_groups=None,
-    cross_attention_dim=None,
+    vid_cross_attention_dim=None,
+    tempo_cross_attention_dim=None,
     prompt_cross_attention_dim=None,
     downsample_padding=None,
-    use_prompt_conditioning = False
 ):
     down_block_type = down_block_type[7:] if down_block_type.startswith(
         "UNetRes") else down_block_type
-    if down_block_type == "DownBlock2D":
-        return DownBlock2D(
+    if down_block_type == "DownBlock3D":
+        return DownBlock3D(
             num_layers=num_layers,
             in_channels=in_channels,
             out_channels=out_channels,
@@ -32,14 +33,8 @@ def get_down_block(
             resnet_groups=resnet_groups,
             downsample_padding=downsample_padding,
         )
-
-    elif down_block_type == "CrossAttnDownBlock2DMusic":
-        if cross_attention_dim is None:
-            raise ValueError(
-                "cross_attention_dim must be specified for CrossAttnDownBlock2D"
-                )
-        
-        return CrossAttnDownBlock2DMusic(
+    elif down_block_type == "CrossAttnDownBlock3DMusic":
+        return CrossAttnDownBlock3DMusic(
             num_layers=num_layers,
             in_channels=in_channels,
             out_channels=out_channels,
@@ -48,10 +43,10 @@ def get_down_block(
             resnet_eps=resnet_eps,
             resnet_groups=resnet_groups,
             downsample_padding=downsample_padding,
-            cross_attention_dim=cross_attention_dim,
-            prompt_cross_attention_dim=prompt_cross_attention_dim,
             attn_num_head_channels=attn_num_head_channels,
-            use_prompt_conditioning=use_prompt_conditioning
+            cross_attention_dims=[vid_cross_attention_dim,
+                                  tempo_cross_attention_dim,
+                                  prompt_cross_attention_dim]
         )
 
     raise ValueError(f"{down_block_type} does not exist.")
@@ -68,14 +63,14 @@ def get_up_block(
     resnet_eps,
     attn_num_head_channels,
     resnet_groups=None,
-    cross_attention_dim=None,
+    vid_cross_attention_dim=None,
+    tempo_cross_attention_dim=None,
     prompt_cross_attention_dim=None,
-    use_prompt_conditioning = False
 ):
     up_block_type = up_block_type[7:] if up_block_type.startswith(
         "UNetRes") else up_block_type
-    if up_block_type == "UpBlock2D":
-        return UpBlock2D(
+    if up_block_type == "UpBlock3D":
+        return UpBlock3D(
             num_layers=num_layers,
             in_channels=in_channels,
             out_channels=out_channels,
@@ -86,12 +81,9 @@ def get_up_block(
             resnet_groups=resnet_groups,
         )
 
-    elif up_block_type == "CrossAttnUpBlock2DMusic":
-        if cross_attention_dim is None:
-            raise ValueError(
-                "cross_attention_dim must be specified for CrossAttnUpBlock2D")
-        
-        return CrossAttnUpBlock2DMusic(
+    elif up_block_type == "CrossAttnUpBlock3DMusic":
+
+        return CrossAttnUpBlock3DMusic(
             num_layers=num_layers,
             in_channels=in_channels,
             out_channels=out_channels,
@@ -100,15 +92,16 @@ def get_up_block(
             add_upsample=add_upsample,
             resnet_eps=resnet_eps,
             resnet_groups=resnet_groups,
-            cross_attention_dim=cross_attention_dim,
             attn_num_head_channels=attn_num_head_channels,
-            prompt_cross_attention_dim=prompt_cross_attention_dim,
-            use_prompt_conditioning=use_prompt_conditioning
+            cross_attention_dims=[vid_cross_attention_dim,
+                                  tempo_cross_attention_dim,
+                                  prompt_cross_attention_dim]
         )
 
     raise ValueError(f"{up_block_type} does not exist.")
 
-class DownBlock2D(nn.Module):
+
+class DownBlock3D(nn.Module):
     def __init__(
         self,
         in_channels: int,
@@ -127,7 +120,7 @@ class DownBlock2D(nn.Module):
         for i in range(num_layers):
             in_channels = in_channels if i == 0 else out_channels
             resnets.append(
-                ResnetBlock2D(
+                ResnetBlock3D(
                     in_channels=in_channels,
                     out_channels=out_channels,
                     temb_channels=temb_channels,
@@ -142,8 +135,8 @@ class DownBlock2D(nn.Module):
         if add_downsample:
             self.downsamplers = nn.ModuleList(
                 [
-                    Downsample2D(
-                        out_channels, use_conv=True, out_channels=out_channels, padding=downsample_padding, name="op"
+                    Downsample3D(
+                        out_channels, use_conv=True, out_channels=out_channels, padding=downsample_padding,
                     )
                 ]
             )
@@ -166,7 +159,8 @@ class DownBlock2D(nn.Module):
 
         return hidden_states, output_states
 
-class UNetMidBlock2DCrossAttnMusic(nn.Module):
+
+class UNetMidBlock3DCrossAttnMusic(nn.Module):
     def __init__(
         self,
         in_channels: int,
@@ -176,22 +170,21 @@ class UNetMidBlock2DCrossAttnMusic(nn.Module):
         resnet_eps: float = 1e-6,
         resnet_groups: int = 32,
         attn_num_head_channels=1,
-        cross_attention_dim=1280,
-        prompt_cross_attention_dim = 1024,
-        use_prompt_conditioning = False
+        cross_attention_dims=[]
     ):
         super().__init__()
 
         self.has_cross_attention = True
         self.attn_num_head_channels = attn_num_head_channels
-        self.use_prompt_conditioning = use_prompt_conditioning
+
+        attention_list = []
 
         resnet_groups = resnet_groups if resnet_groups is not None else min(
             in_channels // 4, 32)
 
         # there is always at least one resnet
         resnets = [
-            ResnetBlock2D(
+            ResnetBlock3D(
                 in_channels=in_channels,
                 out_channels=in_channels,
                 temb_channels=temb_channels,
@@ -200,32 +193,21 @@ class UNetMidBlock2DCrossAttnMusic(nn.Module):
                 dropout=dropout,
             )
         ]
-        attentions = []
-        attentions2 = []
-       
+
         for _ in range(num_layers):
-            attentions.append(
-                    Transformer2DModel(
+            for j in range(len(attention_list)):
+                attention_list[j].append(
+                    Transformer3DModel(
                         attn_num_head_channels,
                         in_channels // attn_num_head_channels,
                         in_channels=in_channels,
                         num_layers=1,
-                        cross_attention_dim=cross_attention_dim,
+                        cross_attention_dim=cross_attention_dims[j],
                         norm_num_groups=resnet_groups,
                     )
                 )
-            attentions2.append(
-                Transformer2DModel(
-                        attn_num_head_channels,
-                        in_channels // attn_num_head_channels,
-                        in_channels=in_channels,
-                        num_layers=1,
-                        cross_attention_dim=prompt_cross_attention_dim,
-                        norm_num_groups=resnet_groups,
-                    )
-            )
             resnets.append(
-                ResnetBlock2D(
+                ResnetBlock3D(
                     in_channels=in_channels,
                     out_channels=in_channels,
                     temb_channels=temb_channels,
@@ -235,10 +217,7 @@ class UNetMidBlock2DCrossAttnMusic(nn.Module):
                 )
             )
 
-        self.attentions = nn.ModuleList(attentions)
-        
-        if use_prompt_conditioning:
-            self.attentions2 = nn.ModuleList(attentions2)
+        self.attention_list = attention_list
 
         self.resnets = nn.ModuleList(resnets)
 
@@ -247,27 +226,23 @@ class UNetMidBlock2DCrossAttnMusic(nn.Module):
         hidden_states: torch.FloatTensor,
         temb: Optional[torch.FloatTensor] = None,
         vid_emb: Optional[torch.FloatTensor] = None,
-        prompt_emb = None
+        tempo_emb: Optional[torch.FloatTensor] = None,
+        prompt_emb=None
     ) -> torch.FloatTensor:
+        embs = [vid_emb, tempo_emb, prompt_emb]
         hidden_states = self.resnets[0](hidden_states, temb)
-        for attn, attn2, resnet in zip(self.attentions, self.attentions2, self.resnets[1:]):
-            
-            hidden_states = attn(
-                hidden_states,
-                encoder_hidden_states=vid_emb,
-            )
-
-            if self.use_prompt_conditioning:
-                hidden_states = attn2(
+        for resnet in self.resnets[1:]:
+            for i, attn in enumerate(self.attention_list):
+                hidden_states = attn(
                     hidden_states,
-                    encoder_hidden_states=prompt_emb,
+                    encoder_hidden_states=embs[i],
                 )
-
             hidden_states = resnet(hidden_states, temb)
 
         return hidden_states
 
-class Transformer2DModel(nn.Module):
+
+class Transformer3DModel(nn.Module):
     def __init__(
         self,
         num_attention_heads: int = 16,
@@ -285,13 +260,14 @@ class Transformer2DModel(nn.Module):
         self.attention_head_dim = attention_head_dim
         inner_dim = num_attention_heads * attention_head_dim
 
-        # 2. Define input layers
+        # Input normalization and projection are adapted for 3D
         self.in_channels = in_channels
+        self.norm = torch.nn.GroupNorm(
+            num_groups=norm_num_groups, num_channels=in_channels, eps=1e-6, affine=norm_elementwise_affine)
 
-        self.norm = torch.nn.GroupNorm(num_groups=norm_num_groups, num_channels=in_channels, eps=1e-6, affine=True)
+        # Replace the Linear layers with Conv3d to handle the temporal dimension.
+        # Kernel size (1, 1, 1) and stride (1, 1, 1) to maintain spatial and temporal dimensions.
         self.proj_in = nn.Linear(in_channels, inner_dim)
-
-        # 3. Define transformers blocks
         self.transformer_blocks = nn.ModuleList(
             [
                 BasicTransformerBlock(
@@ -302,11 +278,9 @@ class Transformer2DModel(nn.Module):
                     cross_attention_dim=cross_attention_dim,
                     norm_elementwise_affine=norm_elementwise_affine,
                 )
-                for d in range(num_layers)
+                for _ in range(num_layers)
             ]
         )
-
-        # 4. Define output layers
         self.out_channels = in_channels if out_channels is None else out_channels
         self.proj_out = nn.Linear(inner_dim, in_channels)
 
@@ -315,31 +289,34 @@ class Transformer2DModel(nn.Module):
         hidden_states: torch.Tensor,
         encoder_hidden_states: Optional[torch.Tensor] = None,
     ):
-        # 1. Input
-        batch, _, height, width = hidden_states.shape
+        # Input processing adapts for the added temporal dimension
+        batch, _, depth, height, width = hidden_states.shape
         residual = hidden_states
 
         hidden_states = self.norm(hidden_states)
         inner_dim = hidden_states.shape[1]
-        hidden_states = hidden_states.permute(0, 2, 3, 1).reshape(batch, height * width, inner_dim)
+
+        # Reshape and permute operations adapted for 3D (including temporal dimension)
+        hidden_states = hidden_states.permute(0, 2, 3, 4, 1).reshape(
+            batch, depth * height * width, inner_dim)
         hidden_states = self.proj_in(hidden_states)
-            
-        # 2. Blocks
+
+        # Transformer blocks process the reshaped hidden states
         for block in self.transformer_blocks:
             hidden_states = block(
                 hidden_states,
                 encoder_hidden_states=encoder_hidden_states,
             )
 
-        # 3. Output
         hidden_states = self.proj_out(hidden_states)
-        hidden_states = hidden_states.reshape(batch, height, width, inner_dim).permute(0, 3, 1, 2).contiguous()
-
+        hidden_states = hidden_states.reshape(
+            batch, depth, height, width, inner_dim).permute(0, 4, 1, 2, 3).contiguous()
         output = hidden_states + residual
 
         return output
-    
-class CrossAttnDownBlock2DMusic(nn.Module):
+
+
+class CrossAttnDownBlock3DMusic(nn.Module):
     def __init__(
         self,
         in_channels: int,
@@ -350,26 +327,21 @@ class CrossAttnDownBlock2DMusic(nn.Module):
         resnet_eps: float = 1e-6,
         resnet_groups: int = 32,
         attn_num_head_channels=1,
-        cross_attention_dim=512,
-        prompt_cross_attention_dim=1024,
+        cross_attention_dims=[],
         downsample_padding=1,
         add_downsample=True,
-        use_prompt_conditioning = False
     ):
         super().__init__()
         resnets = []
-        attentions = []
-        attentions2 = []
+        attention_list = []
 
         self.has_cross_attention = True
         self.attn_num_head_channels = attn_num_head_channels
 
-        self.use_prompt_conditioning = use_prompt_conditioning
-
         for i in range(num_layers):
             in_channels = in_channels if i == 0 else out_channels
             resnets.append(
-                ResnetBlock2D(
+                ResnetBlock3D(
                     in_channels=in_channels,
                     out_channels=out_channels,
                     temb_channels=temb_channels,
@@ -379,45 +351,30 @@ class CrossAttnDownBlock2DMusic(nn.Module):
                 )
             )
 
-            attentions.append(
-                Transformer2DModel(
-                    attn_num_head_channels,
-                    out_channels // attn_num_head_channels,
-                    in_channels=out_channels,
-                    num_layers=1,
-                    cross_attention_dim=cross_attention_dim,
-                    norm_num_groups=resnet_groups,
+            for j in range(len(attention_list)):
+                attention_list[j].append(
+                    Transformer3DModel(
+                        attn_num_head_channels,
+                        out_channels // attn_num_head_channels,
+                        in_channels=out_channels,
+                        num_layers=1,
+                        cross_attention_dim=cross_attention_dims[j],
+                        norm_num_groups=resnet_groups,
+                    )
                 )
-            )
 
-            attentions2.append(
-                Transformer2DModel(
-                    attn_num_head_channels,
-                    out_channels // attn_num_head_channels,
-                    in_channels=out_channels,
-                    num_layers=1,
-                    cross_attention_dim=prompt_cross_attention_dim,
-                    norm_num_groups=resnet_groups,
-                )
-            )
-
-
-        self.attentions = nn.ModuleList(attentions)
-        
-        if use_prompt_conditioning:
-            self.attentions2 = nn.ModuleList(attentions2)
+        self.attention_list = attention_list
 
         self.resnets = nn.ModuleList(resnets)
 
         if add_downsample:
             self.downsamplers = nn.ModuleList(
                 [
-                    Downsample2D(
+                    Downsample3D(
                         out_channels,
                         use_conv=True,
                         out_channels=out_channels,
                         padding=downsample_padding,
-                        name="op"
                     )
                 ]
             )
@@ -429,21 +386,21 @@ class CrossAttnDownBlock2DMusic(nn.Module):
         hidden_states: torch.FloatTensor,
         temb: Optional[torch.FloatTensor] = None,
         vid_emb: Optional[torch.FloatTensor] = None,
-        prompt_emb = None
+        tempo_emb: Optional[torch.FloatTensor] = None,
+        prompt_emb=None
     ):
         output_states = ()
 
-        for resnet, attn, attn2 in zip(self.resnets, self.attentions, self.attentions2):
-            hidden_states = resnet(hidden_states, temb)
-            hidden_states = attn(
-                hidden_states,
-                encoder_hidden_states=vid_emb,
-            )
+        attn_embs = [vid_emb, tempo_emb, prompt_emb]
 
-            hidden_states = attn2(
-                hidden_states,
-                encoder_hidden_states=prompt_emb,
-            )
+        for resnet in self.resnets:
+            hidden_states = resnet(hidden_states, temb)
+
+            for i, attn in enumerate(self.attention_list):
+                hidden_states = attn(
+                    hidden_states,
+                    encoder_hidden_states=attn_embs[i],
+                )
 
             output_states += (hidden_states,)
 
@@ -456,44 +413,36 @@ class CrossAttnDownBlock2DMusic(nn.Module):
         return hidden_states, output_states
 
 
-class Downsample2D(nn.Module):
+class Downsample3D(nn.Module):
     """
-    A downsampling layer with an optional convolution.
+    A downsampling layer with an optional convolution for 3D inputs.
 
     Parameters:
         channels: channels in the inputs and outputs.
         use_conv: a bool determining if a convolution is applied.
-        out_channels:
-        padding:
+        out_channels: output channels, if different from input channels.
+        padding: padding size for the convolutional layer.
     """
 
-    def __init__(self, channels, use_conv=False, out_channels=None, padding=1, name="conv"):
+    def __init__(self, channels, use_conv=False, out_channels=None, padding=(1, 1, 1),):
         super().__init__()
         self.channels = channels
         self.out_channels = out_channels or channels
         self.use_conv = use_conv
         self.padding = padding
-        stride = 2
-        self.name = name
+        stride = (2, 2, 2)
 
         if use_conv:
-            conv = nn.Conv2d(self.channels, self.out_channels, 3, stride=stride, padding=padding)
+            self.conv = nn.Conv3d(self.channels, self.out_channels, kernel_size=(
+                3, 3, 3), stride=stride, padding=padding)
         else:
-            assert self.channels == self.out_channels
-            conv = nn.AvgPool2d(kernel_size=stride, stride=stride)
-
-        if name == "conv":
-            self.Conv2d_0 = conv
-            self.conv = conv
-        elif name == "Conv2d_0":
-            self.conv = conv
-        else:
-            self.conv = conv
+            assert self.channels == self.out_channels, "Channels must match for AvgPool3d when use_conv is False"
+            self.conv = nn.AvgPool3d(kernel_size=stride, stride=stride)
 
     def forward(self, hidden_states):
         assert hidden_states.shape[1] == self.channels
         if self.use_conv and self.padding == 0:
-            pad = (0, 1, 0, 1)
+            pad = (0, 1, 0, 1, 0, 1)  # Padding for depth, height, and width
             hidden_states = F.pad(hidden_states, pad, mode="constant", value=0)
 
         assert hidden_states.shape[1] == self.channels
@@ -501,7 +450,8 @@ class Downsample2D(nn.Module):
 
         return hidden_states
 
-class UpBlock2D(nn.Module):
+
+class UpBlock3D(nn.Module):
     def __init__(
         self,
         in_channels: int,
@@ -523,7 +473,7 @@ class UpBlock2D(nn.Module):
             resnet_in_channels = prev_output_channel if i == 0 else out_channels
 
             resnets.append(
-                ResnetBlock2D(
+                ResnetBlock3D(
                     in_channels=resnet_in_channels + res_skip_channels,
                     out_channels=out_channels,
                     temb_channels=temb_channels,
@@ -537,7 +487,7 @@ class UpBlock2D(nn.Module):
 
         if add_upsample:
             self.upsamplers = nn.ModuleList(
-                [Upsample2D(out_channels, use_conv=True, out_channels=out_channels)])
+                [Upsample3D(out_channels, use_conv=True, out_channels=out_channels)])
         else:
             self.upsamplers = None
 
@@ -557,7 +507,8 @@ class UpBlock2D(nn.Module):
 
         return hidden_states
 
-class ResnetBlock2D(nn.Module):
+
+class ResnetBlock3D(nn.Module):
     def __init__(
         self,
         *,
@@ -570,10 +521,10 @@ class ResnetBlock2D(nn.Module):
         groups_out=None,
         eps=1e-6,
         conv_shortcut_bias: bool = True,
-        conv_2d_out_channels: Optional[int] = None,
+        conv_3d_out_channels: Optional[int] = None,
     ):
         super().__init__()
-        
+
         self.in_channels = in_channels
         out_channels = in_channels if out_channels is None else out_channels
         self.out_channels = out_channels
@@ -583,41 +534,45 @@ class ResnetBlock2D(nn.Module):
             groups_out = groups
 
         self.norm1 = torch.nn.GroupNorm(
-            num_groups=groups, 
-            num_channels=in_channels, 
-            eps=eps, 
-            affine=True) 
+            num_groups=groups,
+            num_channels=in_channels,
+            eps=eps,
+            affine=True)
 
-        self.conv1 = torch.nn.Conv2d(in_channels, out_channels, kernel_size=3, stride=1, padding=1)
+        self.conv1 = torch.nn.Conv3d(
+            in_channels, out_channels, kernel_size=3, stride=1, padding=1)
 
         self.time_emb_proj = torch.nn.Linear(temb_channels, out_channels)
-        
-        self.norm2 = torch.nn.GroupNorm(num_groups=groups_out, num_channels=out_channels, eps=eps, affine=True)
-            
+
+        self.norm2 = torch.nn.GroupNorm(
+            num_groups=groups_out, num_channels=out_channels, eps=eps, affine=True)
+
         self.dropout = torch.nn.Dropout(dropout)
-        conv_2d_out_channels = conv_2d_out_channels or out_channels
-        self.conv2 = torch.nn.Conv2d(out_channels, conv_2d_out_channels, kernel_size=3, stride=1, padding=1)
+        conv_3d_out_channels = conv_3d_out_channels or out_channels
+        self.conv2 = torch.nn.Conv3d(
+            out_channels, conv_3d_out_channels, kernel_size=3, stride=1, padding=1)
 
         self.nonlinearity = nn.SiLU()
 
-        self.use_in_shortcut = self.in_channels != conv_2d_out_channels
+        self.use_in_shortcut = self.in_channels != conv_3d_out_channels
 
         self.conv_shortcut = None
         if self.use_in_shortcut:
-            self.conv_shortcut = torch.nn.Conv2d(
-                in_channels, conv_2d_out_channels, kernel_size=1, stride=1, padding=0, bias=conv_shortcut_bias
+            self.conv_shortcut = torch.nn.Conv3d(
+                in_channels, conv_3d_out_channels, kernel_size=1, stride=1, padding=0, bias=conv_shortcut_bias
             )
 
     def forward(self, input_tensor, temb):
         hidden_states = input_tensor
 
-        hidden_states = self.norm1(hidden_states) 
+        hidden_states = self.norm1(hidden_states)
 
         hidden_states = self.nonlinearity(hidden_states)
 
         hidden_states = self.conv1(hidden_states)
 
-        temb = self.time_emb_proj(self.nonlinearity(temb))[:, :, None, None]
+        temb = self.time_emb_proj(self.nonlinearity(temb))[
+            :, :, None, None, None]
         hidden_states = hidden_states + temb
 
         hidden_states = self.nonlinearity(self.norm2(hidden_states))
@@ -633,7 +588,7 @@ class ResnetBlock2D(nn.Module):
         return output_tensor
 
 
-class CrossAttnUpBlock2DMusic(nn.Module):
+class CrossAttnUpBlock3DMusic(nn.Module):
     def __init__(
         self,
         in_channels: int,
@@ -645,19 +600,15 @@ class CrossAttnUpBlock2DMusic(nn.Module):
         resnet_eps: float = 1e-6,
         resnet_groups: int = 32,
         attn_num_head_channels=1,
-        cross_attention_dim=512,
         add_upsample=True,
-        prompt_cross_attention_dim = 1024,
-        use_prompt_conditioning = False
+        cross_attention_dims=[],
     ):
         super().__init__()
         resnets = []
-        attentions = []
-        attentions2 = []
+        attention_list = []
 
         self.has_cross_attention = True
         self.attn_num_head_channels = attn_num_head_channels
-        self.use_prompt_conditioning = use_prompt_conditioning
 
         for i in range(num_layers):
             res_skip_channels = in_channels if (
@@ -665,7 +616,7 @@ class CrossAttnUpBlock2DMusic(nn.Module):
             resnet_in_channels = prev_output_channel if i == 0 else out_channels
 
             resnets.append(
-                ResnetBlock2D(
+                ResnetBlock3D(
                     in_channels=resnet_in_channels + res_skip_channels,
                     out_channels=out_channels,
                     temb_channels=temb_channels,
@@ -675,38 +626,25 @@ class CrossAttnUpBlock2DMusic(nn.Module):
                 )
             )
 
-            attentions.append(
-                Transformer2DModel(
-                    attn_num_head_channels,
-                    out_channels // attn_num_head_channels,
-                    in_channels=out_channels,
-                    num_layers=1,
-                    cross_attention_dim=cross_attention_dim,
-                    norm_num_groups=resnet_groups,
+            for j in range(len(attention_list)):
+                attention_list[j].append(
+                    Transformer3DModel(
+                        attn_num_head_channels,
+                        out_channels // attn_num_head_channels,
+                        in_channels=out_channels,
+                        num_layers=1,
+                        cross_attention_dim=cross_attention_dims[j],
+                        norm_num_groups=resnet_groups,
+                    )
                 )
-            )
 
-            attentions2.append(
-                Transformer2DModel(
-                    attn_num_head_channels,
-                    out_channels // attn_num_head_channels,
-                    in_channels=out_channels,
-                    num_layers=1,
-                    cross_attention_dim=prompt_cross_attention_dim,
-                    norm_num_groups=resnet_groups,
-                )
-            )
-
-        self.attentions = nn.ModuleList(attentions)
-
-        if use_prompt_conditioning:
-            self.attentions2 = nn.ModuleList(attentions2)
+        self.attention_list = attention_list
 
         self.resnets = nn.ModuleList(resnets)
 
         if add_upsample:
             self.upsamplers = nn.ModuleList(
-                [Upsample2D(out_channels, use_conv=True, out_channels=out_channels)])
+                [Upsample3D(out_channels, use_conv=True, out_channels=out_channels)])
         else:
             self.upsamplers = None
 
@@ -715,12 +653,14 @@ class CrossAttnUpBlock2DMusic(nn.Module):
         hidden_states: torch.FloatTensor,
         res_hidden_states_tuple: Tuple[torch.FloatTensor, ...],
         temb: Optional[torch.FloatTensor] = None,
-        vid_emb: Optional[torch.FloatTensor] = None,
-        prompt_emb = None,
+        prompt_emb=None,
+        video_emb=None,
+        tempo_emb=None,
         upsample_size: Optional[int] = None,
-
     ):
-        for resnet, attn, attn2 in zip(self.resnets, self.attentions, self.attentions2):
+        attn_embs = [video_emb, tempo_emb, prompt_emb]
+
+        for resnet in self.resnets:
             # pop res hidden states
             res_hidden_states = res_hidden_states_tuple[-1]
             res_hidden_states_tuple = res_hidden_states_tuple[:-1]
@@ -728,82 +668,69 @@ class CrossAttnUpBlock2DMusic(nn.Module):
                 [hidden_states, res_hidden_states], dim=1)
 
             hidden_states = resnet(hidden_states, temb)
-            hidden_states = attn(
-                hidden_states,
-                encoder_hidden_states=vid_emb,
-            )
 
-            if self.use_prompt_conditioning:
-                hidden_states = attn2(
+            for i, attn in enumerate(self.attention_list):
+                hidden_states = attn(
                     hidden_states,
-                    encoder_hidden_states=prompt_emb,
+                    encoder_hidden_states=attn_embs[i],
                 )
 
         if self.upsamplers is not None:
             for upsampler in self.upsamplers:
-                hidden_states = upsampler(hidden_states, 
+                hidden_states = upsampler(hidden_states,
                                           upsample_size)
 
         return hidden_states
-    
-class Upsample2D(nn.Module):
+
+
+class Upsample3D(nn.Module):
     """
-    An upsampling layer with an optional convolution.
+    A 3D upsampling layer with an optional 3D convolution.
 
     Parameters:
-        channels: channels in the inputs and outputs.
-        use_conv: a bool determining if a convolution is applied.
-        use_conv_transpose:
-        out_channels:
+        channels: Number of channels in the input and output.
+        use_conv: If True, use a convolution operation after upsampling.
+        use_conv_transpose: If True, use a transposed convolution for upsampling.
+        out_channels: Number of output channels.
     """
 
-    def __init__(self, channels, use_conv=False, use_conv_transpose=False, out_channels=None, name="conv"):
+    def __init__(self, channels, use_conv=False, use_conv_transpose=False, out_channels=None):
         super().__init__()
         self.channels = channels
         self.out_channels = out_channels or channels
         self.use_conv = use_conv
         self.use_conv_transpose = use_conv_transpose
-        self.name = name
 
-        conv = None
         if use_conv_transpose:
-            conv = nn.ConvTranspose2d(channels, self.out_channels, 4, 2, 1)
+            # Adjust kernel size, stride, and padding for 3D.
+            self.conv = nn.ConvTranspose3d(channels, self.out_channels, kernel_size=(
+                2, 4, 4), stride=(2, 2, 2), padding=(0, 1, 1))
         elif use_conv:
-            conv = nn.Conv2d(self.channels, self.out_channels, 3, padding=1)
-
-        if name == "conv":
-            self.conv = conv
+            # Use a 3D convolution with appropriate padding.
+            self.conv = nn.Conv3d(
+                self.channels, self.out_channels, kernel_size=(1, 3, 3), padding=(0, 1, 1))
         else:
-            self.Conv2d_0 = conv
+            self.conv = None
 
     def forward(self, hidden_states, output_size=None):
         assert hidden_states.shape[1] == self.channels
 
         if self.use_conv_transpose:
+            # If using conv transpose, directly return its output.
             return self.conv(hidden_states)
-
-        dtype = hidden_states.dtype
-        if dtype == torch.bfloat16:
-            hidden_states = hidden_states.to(torch.float32)
-
-        if hidden_states.shape[0] >= 64:
-            hidden_states = hidden_states.contiguous()
-
-        # if `output_size` is passed we force the interpolation output
-        # size and do not make use of `scale_factor=2`
-        if output_size is None:
-            hidden_states = F.interpolate(hidden_states, scale_factor=2.0, mode="nearest")
         else:
-            hidden_states = F.interpolate(hidden_states, size=output_size, mode="nearest")
-
-        # If the input is bfloat16, we cast back to bfloat16
-        if dtype == torch.bfloat16:
-            hidden_states = hidden_states.to(dtype)
-
-        if self.use_conv:
-            if self.name == "conv":
-                hidden_states = self.conv(hidden_states)
+            # Use torch.nn.functional.interpolate for 3D upsampling.
+            if output_size is None:
+                # Adjust scale_factor for 3D (temporal, height, width).
+                hidden_states = F.interpolate(
+                    hidden_states, scale_factor=(2.0, 2.0, 2.0), mode="nearest")
             else:
-                hidden_states = self.Conv2d_0(hidden_states)
+                # If output_size is specified, use it to set the output size.
+                hidden_states = F.interpolate(
+                    hidden_states, size=output_size, mode="nearest")
+
+            if self.use_conv:
+                # Apply the convolution if specified.
+                hidden_states = self.conv(hidden_states)
 
         return hidden_states
