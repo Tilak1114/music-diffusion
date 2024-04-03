@@ -26,7 +26,7 @@ class UNet(nn.Module):
             stride=1,
             padding=1
         )
-        self.time_step_embedding = TimeStepEmbedding()
+        self.time_step_embedding = TimeStepEmbedding(out_dim=block_out_channels[-1])
 
         self.rbg_mean_embedding = FloatFeatureEmbedding(1, tempo_embedding_dim)
 
@@ -47,10 +47,10 @@ class UNet(nn.Module):
 
             down_block = get_down_block(
                 down_block_type,
-                num_layers=2,
+                num_layers=1,
                 in_channels=input_channel,
                 out_channels=output_channel,
-                temb_channels=1280,
+                temb_channels=block_out_channels[-1],
                 add_downsample=not is_final_block,
                 resnet_eps=1e-05,
                 resnet_groups=32,
@@ -64,7 +64,7 @@ class UNet(nn.Module):
 
         self.mid_block = UNetMidBlock3DCrossAttnMusic(
             in_channels=block_out_channels[-1],
-            temb_channels=1280,
+            temb_channels=block_out_channels[-1],
             resnet_eps=1e-05,
             cross_attention_dims=[vid_cross_attention_dim[-1], 
                                   tempo_cross_attention_dim[-1],
@@ -104,7 +104,7 @@ class UNet(nn.Module):
                 in_channels=input_channel,
                 out_channels=output_channel,
                 prev_output_channel=prev_output_channel,
-                temb_channels=1280,
+                temb_channels=block_out_channels[-1],
                 add_upsample=add_upsample,
                 resnet_eps=1e-05,
                 resnet_groups=32,
@@ -142,7 +142,7 @@ class UNet(nn.Module):
 
         if rgb_mean is not None:
             rgb_mean = rgb_mean.to(timestep_embedding.device)
-            rgb_embedding = self.rbg_mean_embedding(rgb_mean)
+            rgb_embedding = self.rbg_mean_embedding(rgb_mean).unsqueeze(1)
         else:
             rgb_embedding = None
 
@@ -175,8 +175,8 @@ class UNet(nn.Module):
         for i, upsample_block in enumerate(self.up_blocks):
             is_final_block = i == len(self.up_blocks) - 1
 
-            res_samples = down_block_res_samples[-len(upsample_block.resnets) :]
-            down_block_res_samples = down_block_res_samples[: -len(upsample_block.resnets)]
+            res_samples = down_block_res_samples[-len(upsample_block.resnets):]
+            down_block_res_samples = down_block_res_samples[:-len(upsample_block.resnets)]
 
             # if we have not reached the final block and need to forward the
             # upsample size, we do it here

@@ -441,6 +441,8 @@ class SeqLatentMusicDiffusionModel(pl.LightningModule):
 			self.device) if prompt_embedding != None else None
 		video_embedding = video_embedding.to(
 			self.device) if video_embedding != None else None
+		rgb_mean = rgb_mean.to(
+			self.device) if rgb_mean != None else None
 
 		return self.v_diffusion(true_latent,
 								prompt_embedding,

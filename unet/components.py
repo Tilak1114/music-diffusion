@@ -65,8 +65,6 @@ def get_up_block(
     tempo_cross_attention_dim=None,
     prompt_cross_attention_dim=None,
 ):
-    up_block_type = up_block_type[7:] if up_block_type.startswith(
-        "UNetRes") else up_block_type
     if up_block_type == "UpBlock3D":
         return UpBlock3D(
             num_layers=num_layers,
@@ -206,7 +204,7 @@ class UNetMidBlock3DCrossAttnMusic(nn.Module):
                     )
                 )
                 
-            layerwise_attention_list.append(attention_list)
+            layerwise_attention_list.append(nn.ModuleList(attention_list))
 
             resnets.append(
                 ResnetBlock3D(
@@ -219,7 +217,7 @@ class UNetMidBlock3DCrossAttnMusic(nn.Module):
                 )
             )
 
-        self.layerwise_attention_list = layerwise_attention_list
+        self.layerwise_attention_list = nn.ModuleList(layerwise_attention_list)
 
         self.resnets = nn.ModuleList(resnets)
 
@@ -265,7 +263,10 @@ class Transformer3DModel(nn.Module):
         # Input normalization and projection are adapted for 3D
         self.in_channels = in_channels
         self.norm = torch.nn.GroupNorm(
-            num_groups=norm_num_groups, num_channels=in_channels, eps=1e-6, affine=norm_elementwise_affine)
+            num_groups=norm_num_groups, 
+            num_channels=in_channels, 
+            eps=1e-6, 
+            affine=norm_elementwise_affine)
 
         # Replace the Linear layers with Conv3d to handle the temporal dimension.
         # Kernel size (1, 1, 1) and stride (1, 1, 1) to maintain spatial and temporal dimensions.
@@ -367,9 +368,9 @@ class CrossAttnDownBlock3DMusic(nn.Module):
                     )
                 )
 
-            layer_wise_attentions.append(attention_list)
+            layer_wise_attentions.append(nn.ModuleList(attention_list))
 
-        self.layer_wise_attentions = layer_wise_attentions
+        self.layer_wise_attentions = nn.ModuleList(layer_wise_attentions)
 
         self.resnets = nn.ModuleList(resnets)
 
@@ -646,9 +647,9 @@ class CrossAttnUpBlock3DMusic(nn.Module):
                     )
                 )
             
-            layer_wise_attentions.append(attention_list)
+            layer_wise_attentions.append(nn.ModuleList(attention_list))
 
-        self.layer_wise_attentions = layer_wise_attentions
+        self.layer_wise_attentions = nn.ModuleList(layer_wise_attentions)
 
         self.resnets = nn.ModuleList(resnets)
 

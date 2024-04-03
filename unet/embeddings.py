@@ -321,11 +321,11 @@ def get_timestep_embedding(
     return emb
 
 class TimeStepEmbedding(nn.Module):
-    def __init__(self):
+    def __init__(self, out_dim):
         super(TimeStepEmbedding, self).__init__()
-        self.linear1 = nn.Linear(320, 1280)
+        self.linear1 = nn.Linear(320, out_dim)
         self.activation = nn.SiLU()
-        self.linear2 = nn.Linear(1280, 1280)
+        self.linear2 = nn.Linear(out_dim, out_dim)
 
     def forward(self, timesteps):
         t_emb = get_timestep_embedding(
