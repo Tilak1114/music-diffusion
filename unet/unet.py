@@ -16,6 +16,7 @@ class UNet(nn.Module):
         up_block_types = config['up_block_types']
 
         use_prompt_embedding = config['use_text_conditioning']
+        tempo_embedding_dim = config['tempo_embedding_dim']
 
         self.in_channels = config['in_channels']
         self.pre_encoder_conv = nn.Conv3d(
@@ -27,13 +28,13 @@ class UNet(nn.Module):
         )
         self.time_step_embedding = TimeStepEmbedding()
 
-        self.rbg_mean_embedding = FloatFeatureEmbedding(1, 256)
+        self.rbg_mean_embedding = FloatFeatureEmbedding(1, tempo_embedding_dim)
 
         self.down_blocks = nn.ModuleList()
         self.up_blocks = nn.ModuleList()
 
         vid_cross_attention_dim = [512] * len(down_block_types)
-        tempo_cross_attention_dim = [256] * len(down_block_types)
+        tempo_cross_attention_dim = [tempo_embedding_dim] * len(down_block_types)
         prompt_cross_attention_dim = [1024] * len(down_block_types)
         
         attention_head_dim = config['attention_head_dim']

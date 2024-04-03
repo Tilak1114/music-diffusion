@@ -20,8 +20,6 @@ def get_down_block(
     prompt_cross_attention_dim=None,
     downsample_padding=None,
 ):
-    down_block_type = down_block_type[7:] if down_block_type.startswith(
-        "UNetRes") else down_block_type
     if down_block_type == "DownBlock3D":
         return DownBlock3D(
             num_layers=num_layers,
@@ -177,7 +175,7 @@ class UNetMidBlock3DCrossAttnMusic(nn.Module):
         self.has_cross_attention = True
         self.attn_num_head_channels = attn_num_head_channels
 
-        attention_list = []
+        layerwise_attention_list = []
 
         resnet_groups = resnet_groups if resnet_groups is not None else min(
             in_channels // 4, 32)
@@ -195,8 +193,9 @@ class UNetMidBlock3DCrossAttnMusic(nn.Module):
         ]
 
         for _ in range(num_layers):
-            for j in range(len(attention_list)):
-                attention_list[j].append(
+            attention_list = []
+            for j in range(len(cross_attention_dims)):
+                attention_list.append(
                     Transformer3DModel(
                         attn_num_head_channels,
                         in_channels // attn_num_head_channels,
@@ -206,6 +205,9 @@ class UNetMidBlock3DCrossAttnMusic(nn.Module):
                         norm_num_groups=resnet_groups,
                     )
                 )
+                
+            layerwise_attention_list.append(attention_list)
+
             resnets.append(
                 ResnetBlock3D(
                     in_channels=in_channels,
@@ -217,7 +219,7 @@ class UNetMidBlock3DCrossAttnMusic(nn.Module):
                 )
             )
 
-        self.attention_list = attention_list
+        self.layerwise_attention_list = layerwise_attention_list
 
         self.resnets = nn.ModuleList(resnets)
 
@@ -231,11 +233,11 @@ class UNetMidBlock3DCrossAttnMusic(nn.Module):
     ) -> torch.FloatTensor:
         embs = [vid_emb, tempo_emb, prompt_emb]
         hidden_states = self.resnets[0](hidden_states, temb)
-        for resnet in self.resnets[1:]:
-            for i, attn in enumerate(self.attention_list):
+        for i, resnet in enumerate(self.resnets[1:]):
+            for j, attn in enumerate(self.layerwise_attention_list[i]):
                 hidden_states = attn(
                     hidden_states,
-                    encoder_hidden_states=embs[i],
+                    encoder_hidden_states=embs[j],
                 )
             hidden_states = resnet(hidden_states, temb)
 
@@ -333,7 +335,7 @@ class CrossAttnDownBlock3DMusic(nn.Module):
     ):
         super().__init__()
         resnets = []
-        attention_list = []
+        layer_wise_attentions = []
 
         self.has_cross_attention = True
         self.attn_num_head_channels = attn_num_head_channels
@@ -350,9 +352,11 @@ class CrossAttnDownBlock3DMusic(nn.Module):
                     dropout=dropout,
                 )
             )
+            
+            attention_list = []
 
-            for j in range(len(attention_list)):
-                attention_list[j].append(
+            for j in range(len(cross_attention_dims)):
+                attention_list.append(
                     Transformer3DModel(
                         attn_num_head_channels,
                         out_channels // attn_num_head_channels,
@@ -363,7 +367,9 @@ class CrossAttnDownBlock3DMusic(nn.Module):
                     )
                 )
 
-        self.attention_list = attention_list
+            layer_wise_attentions.append(attention_list)
+
+        self.layer_wise_attentions = layer_wise_attentions
 
         self.resnets = nn.ModuleList(resnets)
 
@@ -393,13 +399,13 @@ class CrossAttnDownBlock3DMusic(nn.Module):
 
         attn_embs = [vid_emb, tempo_emb, prompt_emb]
 
-        for resnet in self.resnets:
+        for i, resnet in enumerate(self.resnets):
             hidden_states = resnet(hidden_states, temb)
 
-            for i, attn in enumerate(self.attention_list):
+            for j, attn in enumerate(self.layer_wise_attentions[i]):
                 hidden_states = attn(
                     hidden_states,
-                    encoder_hidden_states=attn_embs[i],
+                    encoder_hidden_states=attn_embs[j],
                 )
 
             output_states += (hidden_states,)
@@ -605,7 +611,7 @@ class CrossAttnUpBlock3DMusic(nn.Module):
     ):
         super().__init__()
         resnets = []
-        attention_list = []
+        layer_wise_attentions = []
 
         self.has_cross_attention = True
         self.attn_num_head_channels = attn_num_head_channels
@@ -626,8 +632,10 @@ class CrossAttnUpBlock3DMusic(nn.Module):
                 )
             )
 
-            for j in range(len(attention_list)):
-                attention_list[j].append(
+            attention_list = []
+
+            for j in range(len(cross_attention_dims)):
+                attention_list.append(
                     Transformer3DModel(
                         attn_num_head_channels,
                         out_channels // attn_num_head_channels,
@@ -637,8 +645,10 @@ class CrossAttnUpBlock3DMusic(nn.Module):
                         norm_num_groups=resnet_groups,
                     )
                 )
+            
+            layer_wise_attentions.append(attention_list)
 
-        self.attention_list = attention_list
+        self.layer_wise_attentions = layer_wise_attentions
 
         self.resnets = nn.ModuleList(resnets)
 
@@ -660,7 +670,7 @@ class CrossAttnUpBlock3DMusic(nn.Module):
     ):
         attn_embs = [video_emb, tempo_emb, prompt_emb]
 
-        for resnet in self.resnets:
+        for i, resnet in enumerate(self.resnets):
             # pop res hidden states
             res_hidden_states = res_hidden_states_tuple[-1]
             res_hidden_states_tuple = res_hidden_states_tuple[:-1]
@@ -669,10 +679,10 @@ class CrossAttnUpBlock3DMusic(nn.Module):
 
             hidden_states = resnet(hidden_states, temb)
 
-            for i, attn in enumerate(self.attention_list):
+            for j, attn in enumerate(self.layer_wise_attentions[i]):
                 hidden_states = attn(
                     hidden_states,
-                    encoder_hidden_states=attn_embs[i],
+                    encoder_hidden_states=attn_embs[j],
                 )
 
         if self.upsamplers is not None:

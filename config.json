@@ -173,7 +173,7 @@
         "name": "3dconv",
         "description": "",
         "data_config": {
-            "csv_path": "/data/tilak/scripts/master_data/master_seq_data.csv",
+            "csv_path": "/data/tilak/scripts/master_data/master_seq_vids.csv",
             "latent_path": "/data/tilak/scripts/master_data/data/latents",
             "video_embedding_path":"/data/tilak/scripts/master_data/data/video_embeddings",
             "prompt_embedding_path":"/data/tilak/scripts/master_data/data/text_embeddings"
@@ -192,6 +192,7 @@
             "adam_weight_decay": 1e-2,
             "adam_eps": 1e-08,
             "unet": {
+                "tempo_embedding_dim": 128,
                 "use_text_conditioning": true,
                 "in_channels": 8,
                 "block_out_channels": [
@@ -223,7 +224,7 @@
         "trainer_config": {
             "batch_size":8,
             "max_epochs": 100,
-            "devices":[1]
+            "devices":-1
         }
     }
 ]

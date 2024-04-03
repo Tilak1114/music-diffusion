@@ -12,7 +12,7 @@ class MusicVideoDataset(Dataset):
 		self.video_emb_path = video_emb_path
 
 	def __len__(self):
-		return len(self.data_frame[:100])
+		return len(self.data_frame)
 
 	def __getitem__(self, idx):
 		row = self.data_frame.iloc[idx]
@@ -21,7 +21,8 @@ class MusicVideoDataset(Dataset):
 		is_video = row['isVideo']
 		video_start = row['Video Start Time']
 		video_end = row['Video End Time']
-		mean_rgb = row['MeanRGBDiff'] if 'MeanRGBDiff' in row and row['MeanRGBDiff'] > 50 else -1
+		# mean_rgb = row['MeanRGBDiff'] if 'MeanRGBDiff' in row and row['MeanRGBDiff'] > 50 else -1
+		mean_rgb = row['MeanRGBDiff']
 
 		video_emb_file = f"{video_file}_{video_start}_{video_end}" if is_video else f"{video_file}_0_30"
 		video_emb_path = f"{self.video_emb_path}/{video_emb_file}_embedding.pt"
