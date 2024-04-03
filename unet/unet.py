@@ -14,6 +14,7 @@ class UNet(nn.Module):
         block_out_channels = config['block_out_channels']
         down_block_types = config['down_block_types']
         up_block_types = config['up_block_types']
+        num_block_layers = config['num_block_layers']
 
         use_prompt_embedding = config['use_text_conditioning']
         tempo_embedding_dim = config['tempo_embedding_dim']
@@ -47,7 +48,7 @@ class UNet(nn.Module):
 
             down_block = get_down_block(
                 down_block_type,
-                num_layers=1,
+                num_layers=num_block_layers,
                 in_channels=input_channel,
                 out_channels=output_channel,
                 temb_channels=block_out_channels[-1],
@@ -100,7 +101,7 @@ class UNet(nn.Module):
 
             up_block = get_up_block(
                 up_block_type,
-                num_layers=2 + 1,
+                num_layers=num_block_layers + 1,
                 in_channels=input_channel,
                 out_channels=output_channel,
                 prev_output_channel=prev_output_channel,
