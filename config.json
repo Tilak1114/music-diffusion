@@ -193,14 +193,14 @@
             "adam_eps": 1e-08,
             "unet": {
                 "tempo_embedding_dim": 128,
-                "num_block_layers": 1,
+                "num_block_layers": 1, 
                 "use_text_conditioning": true,
                 "in_channels": 8,
                 "block_out_channels": [
+                    160,
                     320,
                     640,
-                    1280,
-                    1280
+                    640
                 ],
                 "down_block_types": [
                     "CrossAttnDownBlock3DMusic",
@@ -225,7 +225,7 @@
         "trainer_config": {
             "batch_size":8,
             "max_epochs": 100,
-            "devices":[1]
+            "devices":[0, 1, 3]
         }
     }
 ]
