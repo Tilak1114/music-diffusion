@@ -453,6 +453,8 @@ class SeqLatentMusicDiffusionModel(pl.LightningModule):
 	def predict(self, dataloader, output_dir):
 		os.makedirs(output_dir, exist_ok=True)
 
+		overlap_duration = 4000
+
 		generated_dir = os.path.join(output_dir, "generated")
 		ground_truth_dir = os.path.join(output_dir, "ground_truth")
 
@@ -460,43 +462,95 @@ class SeqLatentMusicDiffusionModel(pl.LightningModule):
 		os.makedirs(ground_truth_dir, exist_ok=True)
 
 		for batch_idx, batch in enumerate(dataloader):
-			audio_file_names, latent_paths, video_embedding_paths, prompt_embedding_paths = batch
+			loaded_text_embs = []
+			loaded_video_embs = []
+			mean_rgbs = []
 
-			# Load video embeddings
-			video_embs = [torch.load(path) for path in video_embedding_paths]
-			video_embs = torch.stack(video_embs) if video_embs else None
+			save_file_names = batch['save_file_name']
+			latent_paths = batch['segments']
+			prompt_emb_paths = batch['text_emb_path']
+			video_emb_paths = batch['video_emb_path']
+			mean_rgb_values = batch['mean_rgb']
 
-			# Load prompt embeddings
-			prompt_embs = [torch.load(path) for path in prompt_embedding_paths]
-			prompt_embs = torch.stack(prompt_embs) if prompt_embs else None
+			for i in range(len(latent_paths[0])):
+				concatenated_segment_wav = None
+				for j in range(len(latent_paths)):
+					segment_wav = self.v_sampler.latents_to_wave(torch.load(latent_paths[j][i])).squeeze()
 
-			# Load true latents and convert them to waveforms (ground truth audio)
-			true_latents = [torch.load(path).squeeze(0)
-							for path in latent_paths]
-			true_latents = torch.stack(true_latents).to(self.device)
+					if j == 0:
+						concatenated_segment_wav = segment_wav
+					else:
+						overlap1 = concatenated_segment_wav[-overlap_duration:]
+						overlap2 = segment_wav[:overlap_duration]
 
-			ground_truth_wavs = self.v_sampler.latents_to_wave(true_latents)
+						avg_overlap = ((overlap1 + overlap2)/2).astype(overlap1.dtype)
 
-			# Generate new wavs from embeddings
-			generated_wavs = self.v_sampler.generate_latents(
-				video_embs, prompt_embs, self.device)
+						concatenated_segment_wav = np.concatenate([
+							concatenated_segment_wav[:-overlap_duration],
+							avg_overlap,
+							segment_wav[overlap_duration:]
+						])
+				
+				sf.write(os.path.join(
+					ground_truth_dir, f"{save_file_names[i]}.wav"),
+					concatenated_segment_wav.squeeze(), samplerate=16000)
+				# Process the prompt embedding
+				prompt_emb = torch.load(prompt_emb_paths[i])
+				loaded_text_embs.append(prompt_emb)
 
-			for i, (gen_wav, gt_wav) in enumerate(zip(generated_wavs, ground_truth_wavs)):
-				base_name_no_ext = os.path.splitext(
-					os.path.basename(audio_file_names[i]))[0]
+				# Process the video embedding
+				video_emb = torch.load(video_emb_paths[i])
+				loaded_video_embs.append(video_emb)
 
-				gen_output_file_path = os.path.join(
-					generated_dir, f"{base_name_no_ext}.wav")
-				gt_output_file_path = os.path.join(
-					ground_truth_dir, f"{base_name_no_ext}.wav")
+				# Process mean RGB
+				mean_rgbs.append(mean_rgb_values[i])
 
-				sf.write(gen_output_file_path,
-						 gen_wav.squeeze(), samplerate=16000)
-				print(f"Saved generated audio to {gen_output_file_path}")
+			prompt_embs = torch.stack(loaded_text_embs)
+			video_embs = torch.stack(loaded_video_embs)
+			mean_rgbs_tensor = torch.tensor(
+				mean_rgbs, dtype=torch.float32).view(-1, 1)
 
-				sf.write(gt_output_file_path,
-						 gt_wav.squeeze(), samplerate=16000)
-				print(f"Saved ground truth audio to {gt_output_file_path}")
+			gen_latents = self.v_sampler.generate_latents(
+				video_embs,
+				mean_rgbs_tensor,
+				prompt_embs,
+				self.device
+			)
+
+			sequence_length = gen_latents.shape[2]
+
+			split_latents = [gen_latents[:, :, seq_i, :, :]
+								for seq_i in range(sequence_length)]
+
+			split_wavs = []
+			for split_latent in split_latents:
+				gen_wavs = self.v_sampler.latents_to_wave(split_latent)
+				split_wavs.append(gen_wavs)
+			
+			batch_size = len(split_wavs[0])
+			
+			for i in range(batch_size):
+				concatenated_segment_wav = None
+				for j in range(len(split_wavs)):
+					segment_wav = split_wavs[j][i]
+					if j == 0:
+						concatenated_segment_wav = segment_wav
+					else:
+
+						overlap1 = concatenated_segment_wav[-overlap_duration:]
+						overlap2 = segment_wav[:overlap_duration]
+
+						avg_overlap = ((overlap1 + overlap2)/2).astype(overlap1.dtype)
+
+						concatenated_segment_wav = np.concatenate([
+							concatenated_segment_wav[:-overlap_duration],
+							avg_overlap,
+							segment_wav[overlap_duration:]
+						])
+				
+				sf.write(os.path.join(
+					generated_dir, f"{save_file_names[i]}.wav"),
+					concatenated_segment_wav.squeeze(), samplerate=16000)
 
 	def on_train_start(self):
 		if self.trainer.global_rank == 0:

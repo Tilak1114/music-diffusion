@@ -100,11 +100,13 @@ class DataModule(LightningDataModule):
 	def val_dataloader(self):
 		return DataLoader(
 			self.val_dataset, 
-			batch_size=8
+			batch_size=8,
+			num_workers=36,
 			)
 
 	def test_dataloader(self):
 		return DataLoader(
 			self.test_dataset, 
-			batch_size=8
+			batch_size=self.batch_size, 
+			num_workers=36
 			)
