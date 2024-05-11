@@ -8,42 +8,30 @@ The thesis document details the theoretical background, methodologies, experimen
 
 - [Thesis Document](link-to-thesis.pdf)
 
-## Presentation Slides
-
-Find the presentation slides used for the thesis defense and other academic presentations here. These slides summarize the research, findings, and significance of the PixMus project.
-
-- [Presentation Slides](link-to-presentation.pdf)
-
 ## Dataset
 
 The PixMus dataset is specially curated to facilitate research in video-conditioned music generation. It consists of carefully selected video clips paired with corresponding background music, ideal for training and testing music generation models.
 
 - **Dataset Overview:** Includes 53,378 samples with a mix of videos and thumbnails.
 - **Access the Dataset:** You can download the dataset in CSV format. It lists the metadata and links to the audio and video files.
-  - [PixMus Dataset CSV](link-to-dataset.csv)
+  - [PixMus Dataset CSV](https://github.com/Tilak1114/music-diffusion/blob/master/master_data.csv)
+  - [Captions](https://github.com/Tilak1114/music-diffusion/blob/master/captions.json)
 
 ## Output Videos
 
 Below are four output videos from the PixMus model. These videos showcase the quality and relevance of the generated background music in synchronization with the video content.
 
-1. [Output Video 1](link-to-video-1)
-2. [Output Video 2](link-to-video-2)
-3. [Output Video 3](link-to-video-3)
-4. [Output Video 4](link-to-video-4)
+1. [Output Video 1](https://drive.google.com/file/d/1r5Qya1FtKUzcayY7bm9u-gi8H-sn22Mp/view?usp=sharing)
+2. [Output Video 2](https://drive.google.com/file/d/1g0JTCq3Tuk1WjxXu6uoCYUsP6AvUJTQc/view?usp=sharing)
+3. [Output Video 3](https://drive.google.com/file/d/1Dz0DAktRFKdSA2EwbP0AMPU3-9BnRVcc/view?usp=sharing)
+4. [Output Video 4](https://drive.google.com/file/d/17qwf_03S8Qlrw_JIJQb2WKbr3Y7Ke7IK/view?usp=sharing)
 
-## Usage
-
-To use this repository for research or educational purposes, please refer to the individual files for specific details and requirements.
 
 ## Contributions and Contact
 
 Contributions to this project are welcome, whether they involve enhancing the model, expanding the dataset, or improving the documentation. Please feel free to fork the repository, make your changes, and submit a pull request.
 
 For any questions or further information, please contact me at [tilaksharma1114@gmail.com].
-
-## Acknowledgements
-
-Special thanks to everyone who contributed to the PixMus project, including advisors, peers, and the research community, for their invaluable support and insights.
 
 ---
 
