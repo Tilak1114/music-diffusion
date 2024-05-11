@@ -1,0 +1,15 @@
+artifact_uri: file:///data/tilak/projects/music-diffusion/mlflow/550941358247892506/083e5cd05ebe43ff98b01b1907a9b49b/artifacts
+end_time: null
+entry_point_name: ''
+experiment_id: '550941358247892506'
+lifecycle_stage: active
+run_id: 083e5cd05ebe43ff98b01b1907a9b49b
+run_name: base_video_aggregate_with_text
+run_uuid: 083e5cd05ebe43ff98b01b1907a9b49b
+source_name: ''
+source_type: 4
+source_version: ''
+start_time: 1711392815622
+status: 1
+tags: []
+user_id: tilaksha

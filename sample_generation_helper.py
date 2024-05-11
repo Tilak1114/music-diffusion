@@ -2,10 +2,11 @@ import torch
 import numpy as np
 from huggingface_hub import snapshot_download
 
-from transformers import AutoTokenizer, T5ForConditionalGeneration
+from transformers import AutoTokenizer, T5ForConditionalGeneration, T5EncoderModel
 from modelling_deberta_v2 import DebertaV2ForTokenClassificationRegression
 
 from diffusers import DDPMScheduler
+from model_utils import build_pretrained_models
 
 
 class MusicFeaturePredictor:
@@ -130,9 +131,6 @@ class MusicFeaturePredictor:
 class SampleGeneration:
     def __init__(
         self,
-        device,
-        vae, 
-        stft, 
         model,
         name="declare-lab/mustango",
         cache_dir=None,
@@ -144,10 +142,14 @@ class SampleGeneration:
             path, cache_dir=cache_dir, local_files_only=local_files_only
         )
 
-        self.vae = vae
-        self.stft = stft
+        pretrained_model_name = "audioldm-s-full"
+
+        self.vae, self.stft = build_pretrained_models(pretrained_model_name) 
         self.model = model
-        self.device = device
+
+        pretrained_model_name = "google/flan-t5-large"
+        self.tokenizer = AutoTokenizer.from_pretrained(pretrained_model_name)
+        self.text_encoder = T5EncoderModel.from_pretrained(pretrained_model_name)
 
         self.vae.eval()
         self.stft.eval()
@@ -156,22 +158,44 @@ class SampleGeneration:
         self.scheduler = DDPMScheduler.from_pretrained(
             'stabilityai/stable-diffusion-2-1', subfolder="scheduler"
         )
+    
+    def encode_text(self, prompt, device):
+        batch = self.tokenizer(
+            prompt, 
+            max_length=171, 
+            padding='max_length', 
+            truncation=True, return_tensors="pt"
+        )
+        input_ids, attention_mask = batch.input_ids.to(
+            device), batch.attention_mask.to(device)  # cuda
 
-    def generate(self, prompt, steps=100, samples=1, disable_progress=True):
+        with torch.no_grad():
+            self.text_encoder = self.text_encoder.to(device)
+            encoder_hidden_states = self.text_encoder(
+                input_ids=input_ids, attention_mask=attention_mask
+            )[0]
+
+        boolean_encoder_mask = (attention_mask == 1).to(
+            device)  # batch, len_text
+        return encoder_hidden_states, boolean_encoder_mask
+
+    def generate(self, device, prompt, steps=200, samples=1):
         """Genrate music for a single prompt string."""
 
+        encoded_prompt, _ = self.encode_text(prompt, device)
+        self.vae = self.vae.to(device)
+       
         with torch.no_grad():
             beats, chords, chords_times = self.music_model.generate(prompt)
             latents = self.model.inference(
-                [prompt],
+                encoded_prompt,
                 beats,
                 [chords],
                 [chords_times],
                 self.scheduler,
-                self.device,
+                device,
                 steps,
                 samples,
-                disable_progress,
             )
             mel = self.vae.decode_first_stage(latents)
             wave = self.vae.decode_to_waveform(mel)

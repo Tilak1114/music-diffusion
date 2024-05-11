@@ -2,3 +2,9 @@
 /tmp
 /checkpoints
 /logs
+/archive
+/ground_truth
+/music_sim/data
+/experiment_0
+/samples
+/mlflow

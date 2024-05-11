@@ -4,7 +4,6 @@ from audioldm.utils import default_audioldm_config, get_metadata, download_check
 import os
 import torch
 
-
 def build_pretrained_models(name):
 	
 	ckpt_path = get_metadata()[name]["path"]
@@ -36,3 +35,10 @@ def build_pretrained_models(name):
 	vae.eval()
 	fn_STFT.eval()
 	return vae, fn_STFT
+
+def find_latest_checkpoint(checkpoint_dir):
+	checkpoint_files = [f for f in os.listdir(checkpoint_dir) if f.endswith(".ckpt")]
+	if not checkpoint_files:
+		return None
+	
+	return os.path.join(checkpoint_dir, checkpoint_files[0])
