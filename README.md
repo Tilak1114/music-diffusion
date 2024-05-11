@@ -6,7 +6,7 @@ Welcome to the GitHub repository for the PixMus project, a comprehensive explora
 
 The thesis document details the theoretical background, methodologies, experiments, and results of the PixMus model. It covers the application of diffusion models in generating music that aligns with the emotional and thematic elements of videos.
 
-- [Thesis Document](link-to-thesis.pdf)
+- [Thesis Document](https://github.com/Tilak1114/music-diffusion/blob/811ccde418b85ac75a2d2f72ce371c563c28adc5/pixmus_thesis.pdf)
 
 ## Dataset
 
