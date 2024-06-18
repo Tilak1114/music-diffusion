@@ -13,9 +13,8 @@ The thesis document details the theoretical background, methodologies, experimen
 The PixMus dataset is specially curated to facilitate research in video-conditioned music generation. It consists of carefully selected video clips paired with corresponding background music, ideal for training and testing music generation models.
 
 - **Dataset Overview:** Includes 53,378 samples with a mix of videos and thumbnails.
-- **Access the Dataset:** You can download the dataset in CSV format. It lists the metadata and links to the audio and video files.
-  - [PixMus Dataset CSV](https://github.com/Tilak1114/music-diffusion/blob/master/master_data.csv)
-  - [Captions](https://github.com/Tilak1114/music-diffusion/blob/master/captions.json)
+- **Access the Dataset:** You can access the dataset from huggingface.
+  - [PixMus Dataset](https://huggingface.co/datasets/tilak1114/pixmus)
 
 ## Output Videos
 
